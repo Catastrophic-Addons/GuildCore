@@ -3,7 +3,7 @@ local addonName, ns = ...
 
 ns.Defaults = {
     meta = {
-        dbVersion = 8,
+        dbVersion = 9,
     },
     settings = {
         autoScanIntervalMinutes = 60,
@@ -16,6 +16,7 @@ ns.Defaults = {
         officerRankThreshold    = 4,
         debugMode               = false,
         themePreset             = "guildcore",
+        fontTheme               = "wowDefault",
     },
     ui = {
         lastPanel = "dashboard",  -- panel key to restore on next open

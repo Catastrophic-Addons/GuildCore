@@ -194,8 +194,12 @@ function List.Create(parent, rowH, buildRow, onSelect, onContext)
         if not obj._emptyLabel then
             local Th2 = T()
             local lbl = clip:CreateFontString(nil, "OVERLAY")
-            local fd  = Th2.f.body
-            lbl:SetFont(fd[1], fd[2], fd[3])
+            Th2.ApplyFont(lbl, "body")
+            if Th2.RegisterRefresh then
+                Th2:RegisterRefresh(function()
+                    T().ApplyFont(lbl, "body")
+                end)
+            end
             local dc  = Th2.c.textDimmed
             lbl:SetTextColor(dc[1], dc[2], dc[3], dc[4] or 1)
             lbl:SetPoint("CENTER", clip, "CENTER", 0, 0)

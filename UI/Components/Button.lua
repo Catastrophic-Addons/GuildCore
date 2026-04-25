@@ -62,9 +62,8 @@ local function createStyledButton(parent, label, bType, w, h, template)
     bdr:SetColorTexture(bc[1], bc[2], bc[3], 0.6)
 
     -- Label
-    local fd = T.f.body
     local fs = btn:CreateFontString(nil, "OVERLAY")
-    fs:SetFont(fd[1], fd[2], fd[3])
+    T.ApplyFont(fs, "body")
     fs:SetAllPoints()
     fs:SetJustifyH("CENTER"); fs:SetJustifyV("MIDDLE")
     fs:SetTextColor(1, 1, 1, 1)
@@ -109,6 +108,7 @@ local function createStyledButton(parent, label, bType, w, h, template)
     end
 
     function btn:RefreshTheme()
+        theme().ApplyFont(fs, "body")
         refreshVisual()
     end
 

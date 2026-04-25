@@ -65,7 +65,12 @@ local function createMultilineInput(parent, height)
     local edit = CreateFrame("EditBox", nil, scroll)
     edit:SetMultiLine(true)
     edit:SetAutoFocus(false)
-    edit:SetFont(Th.f.body[1], Th.f.body[2], Th.f.body[3])
+    Th.ApplyFont(edit, "input")
+    if Th.RegisterRefresh then
+        Th:RegisterRefresh(function()
+            T().ApplyFont(edit, "input")
+        end)
+    end
     edit:SetTextColor(Th.c.textPrimary[1], Th.c.textPrimary[2], Th.c.textPrimary[3], 1)
     edit:SetWidth(100)
     edit:SetScript("OnEscapePressed", function(self)
@@ -117,7 +122,7 @@ local function createMultilineInput(parent, height)
     holder:SetScript("OnSizeChanged", function(_, width, boxHeight)
         edit:SetWidth(math.max(120, width - 18))
         if boxHeight then
-            edit:SetHeight(math.max(boxHeight - 12, edit:GetStringHeight() + 24))
+            edit:SetHeight(math.max(24, boxHeight - 12))
         end
     end)
 
@@ -539,7 +544,10 @@ end
 function MP:ToggleSelectedCategoryCollapsed()
     local svc = MS()
     local categoryId = svc and svc:GetSelectedCategoryId()
-    local ok, err = categoryId and svc:ToggleCategoryCollapsed(categoryId)
+    local ok, err
+    if categoryId then
+        ok, err = svc:ToggleCategoryCollapsed(categoryId)
+    end
     if not ok then
         GC.UI.MainFrame:SetStatus(err or "Unable to collapse category.", "textWarn")
         return
@@ -631,7 +639,12 @@ end
 
 function MP:ShowTemplateExport(messageIds)
     local bridge = TB()
-    local text, err, count = bridge and bridge:ExportTemplates({ messageIds = messageIds })
+    if not bridge then
+        GC.UI.MainFrame:SetStatus("Template bridge is unavailable.", "textWarn")
+        return
+    end
+
+    local text, err, count = bridge:ExportTemplates({ messageIds = messageIds })
     if not text then
         GC.UI.MainFrame:SetStatus(err or "Unable to export templates.", "textWarn")
         return
@@ -666,7 +679,13 @@ end
 function MP:ValidateTemplateImport()
     local bridge = TB()
     local dialog = self:EnsureTemplateBridgeDialog()
-    local summary, err = bridge and bridge:PreviewTemplateImport(dialog.edit:GetText() or "")
+    if not bridge then
+        dialog.summary:SetText("Template bridge is unavailable.")
+        dialog.importBtn:SetEnabled(false)
+        return nil
+    end
+
+    local summary, err = bridge:PreviewTemplateImport(dialog.edit:GetText() or "")
     if not summary then
         dialog.summary:SetText(err or "Import could not be validated.")
         dialog.importBtn:SetEnabled(false)
@@ -697,7 +716,12 @@ function MP:ConfirmTemplateImport()
 
     local bridge = TB()
     local dialog = self:EnsureTemplateBridgeDialog()
-    local result, err = bridge and bridge:ImportTemplates(dialog.edit:GetText() or "")
+    if not bridge then
+        dialog.summary:SetText("Template bridge is unavailable.")
+        return
+    end
+
+    local result, err = bridge:ImportTemplates(dialog.edit:GetText() or "")
     if not result then
         dialog.summary:SetText(err or "Import failed.")
         return
@@ -921,13 +945,20 @@ end
 
 function MP:GetOutputOptions(fallbackChannel)
     local svc = MS()
+    if not svc then
+        return nil, "Messaging service is unavailable."
+    end
+
     local options = {
         target = self:GetSelectedChannelKey(fallbackChannel),
         recipient = trim(self.recipientInput and self.recipientInput:GetText() or ""),
     }
-    local ok, err, channel, normalized = svc and svc:ValidateChannelOptions(options)
+    local ok, err, channel, normalized = svc:ValidateChannelOptions(options)
     if not ok then
         return nil, err
+    end
+    if type(normalized) ~= "table" then
+        return nil, "Target channel validation did not return output options."
     end
     normalized.channelInfo = channel
     return normalized
@@ -1177,7 +1208,11 @@ function MP:ConfirmEnableAutoMode()
         return
     end
 
-    ok, err = svc and svc:SetAutomationEnabled(true)
+    if svc then
+        ok, err = svc:SetAutomationEnabled(true)
+    else
+        ok, err = false, "Messaging service is unavailable."
+    end
     if not ok then
         GC.UI.MainFrame:SetStatus(err or "Unable to enable Auto Mode.", "textDanger")
         return
@@ -1195,7 +1230,11 @@ function MP:ConfirmStartAutoSend()
         return
     end
 
-    ok, err = svc and svc:StartAutoSend()
+    if svc then
+        ok, err = svc:StartAutoSend()
+    else
+        ok, err = false, "Messaging service is unavailable."
+    end
     if not ok then
         GC.UI.MainFrame:SetStatus(err or "Unable to start auto-send.", "textDanger")
         return
@@ -1316,7 +1355,10 @@ function MP:Create(parent)
     categoryNewBtn:SetPoint("TOPLEFT", categoryInput, "BOTTOMLEFT", 0, -8)
     categoryNewBtn:SetScript("OnClick", function()
         local svc = MS()
-        local category, err = svc and svc:CreateCategory(self.categoryInput:GetText() or "")
+        local category, err
+        if svc then
+            category, err = svc:CreateCategory(self.categoryInput:GetText() or "")
+        end
         if not category then
             GC.UI.MainFrame:SetStatus(err or "Unable to create category.", "textDanger")
             return
@@ -1331,7 +1373,10 @@ function MP:Create(parent)
     categoryRenameBtn:SetPoint("LEFT", categoryNewBtn, "RIGHT", 6, 0)
     categoryRenameBtn:SetScript("OnClick", function()
         local svc = MS()
-        local ok, err = svc and svc:RenameCategory(svc:GetSelectedCategoryId(), self.categoryInput:GetText() or "")
+        local ok, err
+        if svc then
+            ok, err = svc:RenameCategory(svc:GetSelectedCategoryId(), self.categoryInput:GetText() or "")
+        end
         if not ok then
             GC.UI.MainFrame:SetStatus(err or "Unable to rename category.", "textDanger")
             return
@@ -1345,7 +1390,10 @@ function MP:Create(parent)
     categoryDeleteBtn:SetPoint("LEFT", categoryRenameBtn, "RIGHT", 6, 0)
     categoryDeleteBtn:SetScript("OnClick", function()
         local svc = MS()
-        local ok, err = svc and svc:DeleteCategory(svc:GetSelectedCategoryId(), "general")
+        local ok, err
+        if svc then
+            ok, err = svc:DeleteCategory(svc:GetSelectedCategoryId(), "general")
+        end
         if not ok then
             GC.UI.MainFrame:SetStatus(err or "Unable to delete category.", "textDanger")
             return
@@ -1360,7 +1408,10 @@ function MP:Create(parent)
     categoryUpBtn:SetPoint("TOPLEFT", categoryNewBtn, "BOTTOMLEFT", 0, -6)
     categoryUpBtn:SetScript("OnClick", function()
         local svc = MS()
-        local ok, err = svc and svc:MoveCategoryUp(svc:GetSelectedCategoryId())
+        local ok, err
+        if svc then
+            ok, err = svc:MoveCategoryUp(svc:GetSelectedCategoryId())
+        end
         if not ok then
             GC.UI.MainFrame:SetStatus(err or "Unable to move category.", "textWarn")
             return
@@ -1373,7 +1424,10 @@ function MP:Create(parent)
     categoryDownBtn:SetPoint("LEFT", categoryUpBtn, "RIGHT", 6, 0)
     categoryDownBtn:SetScript("OnClick", function()
         local svc = MS()
-        local ok, err = svc and svc:MoveCategoryDown(svc:GetSelectedCategoryId())
+        local ok, err
+        if svc then
+            ok, err = svc:MoveCategoryDown(svc:GetSelectedCategoryId())
+        end
         if not ok then
             GC.UI.MainFrame:SetStatus(err or "Unable to move category.", "textWarn")
             return
@@ -1438,7 +1492,10 @@ function MP:Create(parent)
     moveUpBtn:SetScript("OnClick", function()
         local svc = MS()
         local draft = self:CollectDraft()
-        local ok, err = draft.id and svc and svc:MoveMessageUp(draft.id)
+        local ok, err
+        if draft.id and svc then
+            ok, err = svc:MoveMessageUp(draft.id)
+        end
         if not ok then
             GC.UI.MainFrame:SetStatus(err or "Unable to move message.", "textWarn")
             return
@@ -1452,7 +1509,10 @@ function MP:Create(parent)
     moveDownBtn:SetScript("OnClick", function()
         local svc = MS()
         local draft = self:CollectDraft()
-        local ok, err = draft.id and svc and svc:MoveMessageDown(draft.id)
+        local ok, err
+        if draft.id and svc then
+            ok, err = svc:MoveMessageDown(draft.id)
+        end
         if not ok then
             GC.UI.MainFrame:SetStatus(err or "Unable to move message.", "textWarn")
             return
@@ -1470,7 +1530,10 @@ function MP:Create(parent)
             GC.UI.MainFrame:SetStatus("Select a saved message to move.", "textWarn")
             return
         end
-        local ok, err = svc and svc:MoveMessageToCategory(draft.id, svc:GetSelectedCategoryId())
+        local ok, err
+        if svc then
+            ok, err = svc:MoveMessageToCategory(draft.id, svc:GetSelectedCategoryId())
+        end
         if not ok then
             GC.UI.MainFrame:SetStatus(err or "Unable to move message.", "textDanger")
             return
@@ -1708,7 +1771,7 @@ function MP:Create(parent)
     bodyHolder:SetPoint("BOTTOMRIGHT", editorContent, "BOTTOMRIGHT", 0, 0)
     bodyInput:SetScript("OnTextChanged", function(self)
         self:SetWidth(math.max(120, bodyHolder:GetWidth() - 18))
-        self:SetHeight(math.max(bodyHolder:GetHeight() - 12, self:GetStringHeight() + 24))
+        self:SetHeight(math.max(24, bodyHolder:GetHeight() - 12))
         MP.bodyCountLabel:SetText(string.format("%d chars", #(self:GetText() or "")))
         if self == MP.bodyInput and MP.currentDraft then
             MP.currentDraft.dirty = true
@@ -1815,11 +1878,16 @@ function MP:Create(parent)
         end
 
         local function queuePreview()
-            local ok, err = svc and svc:QueueChunks(self.previewData, {
-                target = outputOptions.target,
-                recipient = outputOptions.recipient,
-                sourceMessageId = self.currentDraft and self.currentDraft.id or nil,
-            })
+            local ok, err
+            if svc then
+                ok, err = svc:QueueChunks(self.previewData, {
+                    target = outputOptions.target,
+                    recipient = outputOptions.recipient,
+                    sourceMessageId = self.currentDraft and self.currentDraft.id or nil,
+                })
+            else
+                ok, err = false, "Messaging service is unavailable."
+            end
             if not ok then
                 GC.UI.MainFrame:SetStatus(err or "Unable to queue preview chunks.", "textDanger")
                 return
@@ -1854,7 +1922,12 @@ function MP:Create(parent)
             GC.UI.MainFrame:SetStatus(optionsErr or "Invalid target channel.", "textDanger")
             return
         end
-        local ok, err = svc and svc:LoadChunkIntoChat(chunk.text, outputOptions)
+        local ok, err
+        if svc then
+            ok, err = svc:LoadChunkIntoChat(chunk.text, outputOptions)
+        else
+            ok, err = false, "Messaging service is unavailable."
+        end
         if not ok then
             GC.UI.MainFrame:SetStatus(err or "Unable to load chunk into chat.", "textDanger")
             return
@@ -1894,7 +1967,12 @@ function MP:Create(parent)
     sendNextBtn:SetPoint("TOPLEFT", previewBtn, "BOTTOMLEFT", 0, -8)
     sendNextBtn:SetScript("OnClick", function()
         local svc = MS()
-        local ok, err = svc and svc:SendNextQueuedMessage()
+        local ok, err
+        if svc then
+            ok, err = svc:SendNextQueuedMessage()
+        else
+            ok, err = false, "Messaging service is unavailable."
+        end
         if not ok then
             GC.UI.MainFrame:SetStatus(err or "Unable to send queued chunk.", "textWarn")
             return

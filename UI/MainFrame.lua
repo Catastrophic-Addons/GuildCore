@@ -272,7 +272,12 @@ function MF:Create()
     closeBg:SetAllPoints()
     closeBg:SetColorTexture(0.40, 0.07, 0.07, 0.90)
     local closeFs = closeBtn:CreateFontString(nil, "OVERLAY")
-    closeFs:SetFont(Th.f.subheader[1], 14, "")
+    Th.ApplyFont(closeFs, "subheader")
+    if Th.RegisterRefresh then
+        Th:RegisterRefresh(function()
+            T().ApplyFont(closeFs, "subheader")
+        end)
+    end
     closeFs:SetAllPoints(); closeFs:SetJustifyH("CENTER"); closeFs:SetJustifyV("MIDDLE")
     closeFs:SetText("X"); closeFs:SetTextColor(1, 0.55, 0.55, 1)
     closeBtn:SetScript("OnEnter", function() closeBg:SetColorTexture(0.72, 0.12, 0.12, 1) end)
@@ -294,6 +299,10 @@ function MF:Create()
     local memberFs = Th.Fs(statusBar, "tiny", "", "textDimmed")
     memberFs:SetPoint("RIGHT", -12, 0)
     self.memberCountLabel = memberFs
+
+    local footerFs = Th.Fs(statusBar, "tiny", "\194\169 2026 AddOns by Catastrophie", "textDimmed")
+    footerFs:SetPoint("CENTER", statusBar, "CENTER", 0, 0)
+    footerFs:SetTextColor(1, 0.55, 0.1, 1)
 
     -- ── Nav sidebar ─────────────────────────────
     local sidebar = CreateFrame("Frame", nil, frame)

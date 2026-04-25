@@ -255,6 +255,14 @@ function GC.Migrations:Run()
         currentVersion = 8
     end
 
+    if currentVersion < 9 then
+        root.settings = root.settings or {}
+        if root.settings.fontTheme == nil then
+            root.settings.fontTheme = "wowDefault"
+        end
+        currentVersion = 9
+    end
+
     for _, guild in pairs(root.guilds or {}) do
         migrateGuild(guild)
     end

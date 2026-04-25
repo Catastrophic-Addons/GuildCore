@@ -73,8 +73,12 @@ function Panel.Input(parent, w, h)
     eb:SetAutoFocus(false)
     eb:SetFontObject("ChatFontNormal")
 
-    local fd = Th.f.body
-    eb:SetFont(fd[1], fd[2], fd[3])
+    Th.ApplyFont(eb, "input")
+    if Th.RegisterRefresh then
+        Th:RegisterRefresh(function()
+            Th.ApplyFont(eb, "input")
+        end)
+    end
 
     local pc = Th.c.textPrimary
     eb:SetTextColor(pc[1], pc[2], pc[3], pc[4])

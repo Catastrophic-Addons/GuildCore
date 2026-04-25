@@ -198,8 +198,12 @@ function RP:Create(parent)
     searchBox:SetMaxLetters(40)
     -- Placeholder hint
     local hint = searchBox:CreateFontString(nil, "OVERLAY")
-    local fd = Th.f.small
-    hint:SetFont(fd[1], fd[2], fd[3])
+    Th.ApplyFont(hint, "small")
+    if Th.RegisterRefresh then
+        Th:RegisterRefresh(function()
+            T().ApplyFont(hint, "small")
+        end)
+    end
     hint:SetTextColor(0.4, 0.4, 0.5, 1)
     hint:SetText("Search name, rank, class…")
     hint:SetPoint("LEFT", searchBox, "LEFT", 4, 0)

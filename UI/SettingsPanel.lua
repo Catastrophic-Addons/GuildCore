@@ -351,6 +351,44 @@ function SP:Create(parent)
         themeHelp:SetPoint("TOPRIGHT", content, "TOPRIGHT", -4, y)
         themeHelp:SetWordWrap(true)
         gap(28)
+
+        local fontOptions = {}
+        for _, key in ipairs(Th.GetFontThemeKeys()) do
+            fontOptions[#fontOptions + 1] = {key = key, label = key}
+        end
+        local _, getFontTheme, setFontTheme = makeDropdown(content, "Font Theme", y, 190, fontOptions, function(fontTheme)
+            local applied = T().SetFontTheme(fontTheme)
+            if GC.UI.MainFrame and GC.UI.MainFrame.ApplyTheme then
+                GC.UI.MainFrame:ApplyTheme()
+            end
+            GC.UI.MainFrame:SetStatus("Font theme set to " .. applied .. ".", "textSuccess")
+        end)
+        self._setters.fontTheme = setFontTheme
+        self._getters.fontTheme = getFontTheme
+        gap(34)
+
+        local preview = CreateFrame("Frame", nil, content)
+        preview:SetPoint("TOPLEFT", content, "TOPLEFT", 0, y)
+        preview:SetPoint("TOPRIGHT", content, "TOPRIGHT", 0, y)
+        preview:SetHeight(156)
+        Th.Bg(preview, Th.c.panelAlt, Th.c.border)
+        local previewRows = {
+            {"title", "Title Text"},
+            {"header", "Header Text"},
+            {"subheader", "Subheader Text"},
+            {"body", "Body text shows normal reading density."},
+            {"label", "Label Text"},
+            {"small", "Small text"},
+            {"tiny", "Tiny text"},
+            {"status", "Status text"},
+        }
+        local py = -10
+        for _, row in ipairs(previewRows) do
+            local fs = Th.Fs(preview, row[1], row[2], row[1] == "status" and "textWarn" or "textSecond")
+            fs:SetPoint("TOPLEFT", preview, "TOPLEFT", 14, py)
+            py = py - 18
+        end
+        gap(166)
     end
 
     -- ── GENERAL ──────────────────────────────────
@@ -406,7 +444,7 @@ function SP:Create(parent)
     -- ── DANGER ZONE ──────────────────────────────
     secHdr("Danger Zone")
     local note = Th.Fs(content, "small",
-        "Resetting settings restores all defaults. Reloading the UI applies them fully.", "textDimmed")
+        "Resetting settings restores all defaults and applies appearance changes immediately.", "textDimmed")
     note:SetPoint("TOPLEFT", content, "TOPLEFT", 0, y)
     note:SetPoint("TOPRIGHT", content, "TOPRIGHT", -4, y)
     note:SetWordWrap(true)
@@ -420,6 +458,12 @@ function SP:Create(parent)
             for k, v in pairs(defaults) do settings[k] = v end
             if settings.themePreset then
                 T():ApplyPresetLive(settings.themePreset)
+                if GC.UI.MainFrame and GC.UI.MainFrame.ApplyTheme then
+                    GC.UI.MainFrame:ApplyTheme()
+                end
+            end
+            if settings.fontTheme then
+                T().SetFontTheme(settings.fontTheme)
                 if GC.UI.MainFrame and GC.UI.MainFrame.ApplyTheme then
                     GC.UI.MainFrame:ApplyTheme()
                 end

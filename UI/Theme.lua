@@ -71,18 +71,81 @@ T.c = {
     rowSelected   = {0.110, 0.240, 0.310, 1.00},
 }
 
--- Font registry {path, size, flags}
-T.f = {
-    title     = {"Fonts\\FRIZQT__.TTF", 22, ""},
-    header    = {"Fonts\\FRIZQT__.TTF", 15, ""},
-    subheader = {"Fonts\\FRIZQT__.TTF", 13, ""},
-    nav       = {"Fonts\\ARIALN.TTF",   13, ""},
-    body      = {"Fonts\\ARIALN.TTF",   12, ""},
-    label     = {"Fonts\\ARIALN.TTF",   12, ""},
-    small     = {"Fonts\\ARIALN.TTF",   11, ""},
-    tiny      = {"Fonts\\ARIALN.TTF",   10, ""},
-    status    = {"Fonts\\ARIALN.TTF",   11, "OUTLINE"},
+local ADDON_FONT_PATH = "Interface\\AddOns\\GuildCore\\Assets\\fonts\\"
+local FALLBACK_FONT = "Fonts\\ARIALN.TTF"
+
+local function addonFont(fileName)
+    return ADDON_FONT_PATH .. fileName
+end
+
+-- Font theme registry. Add or remove complete font presets here; every theme
+-- should provide all roles so the UI can switch typography without layout code
+-- needing to know which font family is active.
+T.fontThemes = {
+    wowDefault = {
+        title     = {"Fonts\\FRIZQT__.TTF", 26, ""},
+        header    = {"Fonts\\FRIZQT__.TTF", 17, ""},
+        subheader = {"Fonts\\FRIZQT__.TTF", 15, ""},
+        nav       = {"Fonts\\ARIALN.TTF",   14, ""},
+        body      = {"Fonts\\ARIALN.TTF",   13, ""},
+        label     = {"Fonts\\ARIALN.TTF",   13, ""},
+        input     = {"Fonts\\ARIALN.TTF",   13, ""},
+        small     = {"Fonts\\ARIALN.TTF",   12, ""},
+        tiny      = {"Fonts\\ARIALN.TTF",   11, ""},
+        status    = {"Fonts\\ARIALN.TTF",   12, "OUTLINE"},
+    },
+    magenta = {
+        title     = {addonFont("MagentaBold.ttf"),    26, ""},
+        header    = {addonFont("MagentaBold.ttf"),    17, ""},
+        subheader = {addonFont("MagentaReguler.ttf"), 15, ""},
+        nav       = {addonFont("MagentaReguler.ttf"), 14, ""},
+        body      = {addonFont("MagentaReguler.ttf"), 13, ""},
+        label     = {addonFont("MagentaReguler.ttf"), 13, ""},
+        input     = {addonFont("MagentaReguler.ttf"), 13, ""},
+        small     = {addonFont("MagentaReguler.ttf"), 12, ""},
+        tiny      = {addonFont("MagentaReguler.ttf"), 11, ""},
+        status    = {addonFont("MagentaBold.ttf"),    12, "OUTLINE"},
+    },
+    frescito = {
+        title     = {addonFont("FrescitoBold.ttf"),    26, ""},
+        header    = {addonFont("FrescitoBold.ttf"),    17, ""},
+        subheader = {addonFont("FrescitoRegular.ttf"), 15, ""},
+        nav       = {addonFont("FrescitoRegular.ttf"), 14, ""},
+        body      = {addonFont("FrescitoRegular.ttf"), 13, ""},
+        label     = {addonFont("FrescitoRegular.ttf"), 13, ""},
+        input     = {"Fonts\\ARIALN.TTF",              13, ""},
+        small     = {addonFont("FrescitoRegular.ttf"), 12, ""},
+        tiny      = {addonFont("FrescitoRegular.ttf"), 11, ""},
+        status    = {addonFont("FrescitoBold.ttf"),    12, "OUTLINE"},
+    },
+    solemn = {
+        title     = {addonFont("SolemnSojourn.ttf"),   26, ""},
+        header    = {addonFont("MagentaBold.ttf"),     17, ""},
+        subheader = {addonFont("MagentaReguler.ttf"),  15, ""},
+        nav       = {addonFont("MagentaReguler.ttf"),  14, ""},
+        body      = {addonFont("MagentaReguler.ttf"),  13, ""},
+        label     = {addonFont("MagentaReguler.ttf"),  13, ""},
+        input     = {addonFont("MagentaReguler.ttf"),  13, ""},
+        small     = {addonFont("MagentaReguler.ttf"),  12, ""},
+        tiny      = {addonFont("MagentaReguler.ttf"),  11, ""},
+        status    = {addonFont("MagentaBold.ttf"),     12, "OUTLINE"},
+    },
+    exalted = {
+        title     = {addonFont("ExaltedDemo.ttf"),     26, ""},
+        header    = {addonFont("MagentaBold.ttf"),     17, ""},
+        subheader = {addonFont("MagentaReguler.ttf"),  15, ""},
+        nav       = {addonFont("MagentaReguler.ttf"),  14, ""},
+        body      = {addonFont("MagentaReguler.ttf"),  13, ""},
+        label     = {addonFont("MagentaReguler.ttf"),  13, ""},
+        input     = {addonFont("MagentaReguler.ttf"),  13, ""},
+        small     = {addonFont("MagentaReguler.ttf"),  12, ""},
+        tiny      = {addonFont("MagentaReguler.ttf"),  11, ""},
+        status    = {addonFont("MagentaBold.ttf"),     12, "OUTLINE"},
+    },
 }
+
+local FONT_THEME_ORDER = {"wowDefault", "magenta", "frescito", "solemn", "exalted"}
+T.f = T.fontThemes.wowDefault
 
 -- Class colors for roster display
 T.classColor = {
@@ -185,9 +248,167 @@ local PRESETS = {
             rowSelected = {0.090, 0.210, 0.320, 1.00},
         },
     },
+    voidsteel = {
+        label = "Voidsteel",
+        colors = {
+            bg = {0.035, 0.035, 0.050, 0.97},
+            chrome = {0.025, 0.025, 0.040, 1.00},
+            panel = {0.055, 0.055, 0.080, 1.00},
+            panelAlt = {0.045, 0.045, 0.070, 1.00},
+            borderAccent = {0.620, 0.480, 1.000, 0.65},
+            accent = {0.620, 0.480, 1.000, 1.00},
+            accentDim = {0.620, 0.480, 1.000, 0.08},
+            accentMid = {0.620, 0.480, 1.000, 0.25},
+            textAccent = {0.720, 0.600, 1.000, 1.00},
+            btnPrimary = {0.200, 0.160, 0.350, 1.00},
+            btnPrimHov = {0.300, 0.240, 0.500, 1.00},
+            navActive = {0.090, 0.085, 0.140, 1.00},
+            navHover = {0.070, 0.070, 0.120, 1.00},
+            rowSelected = {0.180, 0.140, 0.300, 1.00},
+        },
+    },
+    verdant = {
+        label = "Verdant",
+        colors = {
+            bg = {0.050, 0.070, 0.055, 0.97},
+            chrome = {0.040, 0.060, 0.045, 1.00},
+            panel = {0.070, 0.095, 0.075, 1.00},
+            panelAlt = {0.060, 0.085, 0.068, 1.00},
+            borderAccent = {0.400, 0.850, 0.550, 0.65},
+            accent = {0.400, 0.850, 0.550, 1.00},
+            accentDim = {0.400, 0.850, 0.550, 0.08},
+            accentMid = {0.400, 0.850, 0.550, 0.25},
+            textAccent = {0.500, 0.950, 0.650, 1.00},
+            btnPrimary = {0.150, 0.350, 0.220, 1.00},
+            btnPrimHov = {0.220, 0.480, 0.300, 1.00},
+            navActive = {0.090, 0.140, 0.100, 1.00},
+            navHover = {0.075, 0.120, 0.090, 1.00},
+            rowSelected = {0.120, 0.300, 0.180, 1.00},
+        },
+    },
+    stormforge = {
+        label = "Stormforge",
+        colors = {
+            bg = {0.040, 0.050, 0.065, 0.97},
+            chrome = {0.030, 0.040, 0.055, 1.00},
+            panel = {0.060, 0.075, 0.095, 1.00},
+            panelAlt = {0.050, 0.065, 0.085, 1.00},
+            borderAccent = {0.300, 0.650, 1.000, 0.70},
+            accent = {0.300, 0.650, 1.000, 1.00},
+            accentDim = {0.300, 0.650, 1.000, 0.08},
+            accentMid = {0.300, 0.650, 1.000, 0.25},
+            textAccent = {0.450, 0.800, 1.000, 1.00},
+            btnPrimary = {0.120, 0.260, 0.420, 1.00},
+            btnPrimHov = {0.180, 0.380, 0.600, 1.00},
+            navActive = {0.085, 0.115, 0.155, 1.00},
+            navHover = {0.070, 0.095, 0.135, 1.00},
+            rowSelected = {0.090, 0.200, 0.320, 1.00},
+        },
+    },
+    bloodwake = {
+        label = "Bloodwake",
+        colors = {
+            bg = {0.070, 0.035, 0.040, 0.97},
+            chrome = {0.055, 0.025, 0.030, 1.00},
+            panel = {0.095, 0.050, 0.055, 1.00},
+            panelAlt = {0.080, 0.040, 0.045, 1.00},
+            borderAccent = {0.850, 0.200, 0.250, 0.70},
+            accent = {0.850, 0.200, 0.250, 1.00},
+            accentDim = {0.850, 0.200, 0.250, 0.08},
+            accentMid = {0.850, 0.200, 0.250, 0.25},
+            textAccent = {0.950, 0.350, 0.400, 1.00},
+            btnPrimary = {0.350, 0.100, 0.120, 1.00},
+            btnPrimHov = {0.520, 0.160, 0.180, 1.00},
+            navActive = {0.160, 0.070, 0.080, 1.00},
+            navHover = {0.135, 0.060, 0.070, 1.00},
+            rowSelected = {0.320, 0.120, 0.140, 1.00},
+        },
+    },
+    gilded = {
+        label = "Gilded",
+        colors = {
+            bg = {0.060, 0.055, 0.040, 0.97},
+            chrome = {0.050, 0.045, 0.030, 1.00},
+            panel = {0.085, 0.075, 0.050, 1.00},
+            panelAlt = {0.072, 0.065, 0.045, 1.00},
+            borderAccent = {1.000, 0.820, 0.320, 0.70},
+            accent = {1.000, 0.820, 0.320, 1.00},
+            accentDim = {1.000, 0.820, 0.320, 0.08},
+            accentMid = {1.000, 0.820, 0.320, 0.25},
+            textAccent = {1.000, 0.900, 0.500, 1.00},
+            btnPrimary = {0.420, 0.320, 0.120, 1.00},
+            btnPrimHov = {0.600, 0.450, 0.180, 1.00},
+            navActive = {0.140, 0.120, 0.080, 1.00},
+            navHover = {0.120, 0.100, 0.070, 1.00},
+            rowSelected = {0.320, 0.250, 0.100, 1.00},
+        },
+    },
+    cupertino = {
+        label = "Cupertino",
+        colors = {
+            bg = {0.940, 0.940, 0.950, 0.97},
+            chrome = {0.900, 0.900, 0.920, 1.00},
+            panel = {0.970, 0.970, 0.980, 1.00},
+            panelAlt = {0.955, 0.955, 0.970, 1.00},
+            panelHover = {0.900, 0.920, 0.965, 1.00},
+            border = {0.730, 0.730, 0.780, 1.00},
+            borderStrong = {0.620, 0.640, 0.700, 1.00},
+            borderAccent = {0.350, 0.550, 0.950, 0.45},
+            separator = {0.760, 0.770, 0.820, 1.00},
+            accent = {0.250, 0.500, 0.950, 1.00},
+            accentDim = {0.250, 0.500, 0.950, 0.08},
+            accentMid = {0.250, 0.500, 0.950, 0.22},
+            textPrimary = {0.080, 0.085, 0.105, 1.00},
+            textSecond = {0.220, 0.230, 0.270, 1.00},
+            textDimmed = {0.430, 0.440, 0.500, 1.00},
+            textAccent = {0.200, 0.450, 0.900, 1.00},
+            btnPrimary = {0.250, 0.500, 0.950, 1.00},
+            btnPrimHov = {0.350, 0.600, 1.000, 1.00},
+            btnSecond = {0.860, 0.865, 0.900, 1.00},
+            btnSecHov = {0.800, 0.820, 0.880, 1.00},
+            btnDisabled = {0.820, 0.825, 0.850, 1.00},
+            navBg = {0.900, 0.900, 0.920, 1.00},
+            navActive = {0.880, 0.880, 0.910, 1.00},
+            navHover = {0.900, 0.900, 0.930, 1.00},
+            rowOdd = {0.965, 0.965, 0.975, 1.00},
+            rowEven = {0.945, 0.948, 0.960, 1.00},
+            rowHover = {0.880, 0.905, 0.960, 1.00},
+            rowSelected = {0.820, 0.860, 0.950, 1.00},
+        },
+    },
+    cupertinoDark = {
+        label = "Cupertino Dark",
+        colors = {
+            bg = {0.090, 0.090, 0.100, 0.97},
+            chrome = {0.070, 0.070, 0.080, 1.00},
+            panel = {0.120, 0.120, 0.135, 1.00},
+            panelAlt = {0.105, 0.105, 0.120, 1.00},
+            borderAccent = {0.350, 0.550, 0.950, 0.60},
+            accent = {0.350, 0.600, 1.000, 1.00},
+            accentDim = {0.350, 0.600, 1.000, 0.08},
+            accentMid = {0.350, 0.600, 1.000, 0.25},
+            textAccent = {0.500, 0.700, 1.000, 1.00},
+            btnPrimary = {0.180, 0.320, 0.600, 1.00},
+            btnPrimHov = {0.250, 0.420, 0.780, 1.00},
+            navActive = {0.150, 0.150, 0.180, 1.00},
+            navHover = {0.130, 0.130, 0.160, 1.00},
+            rowSelected = {0.200, 0.300, 0.450, 1.00},
+        },
+    },
 }
 
-local PRESET_ORDER = {"guildcore", "ember", "tideglass"}
+local PRESET_ORDER = {
+    "guildcore",
+    "ember",
+    "tideglass",
+    "voidsteel",
+    "verdant",
+    "stormforge",
+    "bloodwake",
+    "gilded",
+    "cupertino",
+    "cupertinoDark",
+}
 local themedTextures = {}
 local themedFontStrings = {}
 local refreshCallbacks = {}
@@ -234,6 +455,55 @@ local function applyFontStringColor(fontString, colorKey)
     end
 end
 
+local function resolveFontThemeName(name)
+    if T.fontThemes[name] then
+        return name
+    end
+    local wanted = tostring(name or ""):lower()
+    for _, key in ipairs(FONT_THEME_ORDER) do
+        if key:lower() == wanted then
+            return key
+        end
+    end
+    return "wowDefault"
+end
+
+function T.GetFontThemeName()
+    return T.activeFontTheme or resolveFontThemeName(GC.DB and GC.DB.GetSettings and GC.DB:GetSettings() and GC.DB:GetSettings().fontTheme)
+end
+
+function T.GetFontThemeKeys()
+    return FONT_THEME_ORDER
+end
+
+function T.SetFontTheme(name)
+    local themeName = resolveFontThemeName(name)
+    T.activeFontTheme = themeName
+    T.f = T.fontThemes[themeName] or T.fontThemes.wowDefault
+    local settings = GC.DB and GC.DB.GetSettings and GC.DB:GetSettings()
+    if settings then
+        settings.fontTheme = themeName
+    end
+    T:RefreshRegistered()
+    return themeName
+end
+
+function T.GetFont(role)
+    local fontTheme = T.fontThemes[T.GetFontThemeName()] or T.fontThemes.wowDefault
+    local fd = fontTheme[role] or fontTheme.body or T.fontThemes.wowDefault.body
+    local path = fd and fd[1] or FALLBACK_FONT
+    if not path or path == "" then
+        path = FALLBACK_FONT
+    end
+    return {path, fd and fd[2] or 12, fd and fd[3] or ""}
+end
+
+function T.ApplyFont(fontString, role)
+    if not fontString then return end
+    local fd = T.GetFont(role or "body")
+    fontString:SetFont(fd[1], fd[2], fd[3])
+end
+
 function T:ApplyPreset(name)
     local presetKey = PRESETS[name] and name or "guildcore"
     local preset = PRESETS[presetKey]
@@ -256,6 +526,7 @@ function T:RefreshRegistered()
         applyTextureColor(item.texture, item.colorKey, item.alpha)
     end
     for _, item in ipairs(themedFontStrings) do
+        self.ApplyFont(item.fontString, item.role)
         applyFontStringColor(item.fontString, item.colorKey)
     end
     for _, callback in ipairs(refreshCallbacks) do
@@ -291,6 +562,7 @@ end
 function T:ApplyConfiguredPreset()
     local settings = GC.DB and GC.DB.GetSettings and GC.DB:GetSettings()
     local preset = settings and settings.themePreset or "guildcore"
+    T.SetFontTheme(settings and settings.fontTheme or "wowDefault")
     return self:ApplyPreset(preset)
 end
 
@@ -350,12 +622,11 @@ end
 
 -- Create a FontString using the theme font registry
 function T.Fs(parent, fontKey, text, colorKey)
-    local fd = T.f[fontKey] or T.f.body
     local c  = colorKey and T.c[colorKey] or T.c.textPrimary
     local fs = parent:CreateFontString(nil, "OVERLAY")
-    fs:SetFont(fd[1], fd[2], fd[3])
+    T.ApplyFont(fs, fontKey)
     fs:SetTextColor(c[1], c[2], c[3], c[4] or 1)
-    themedFontStrings[#themedFontStrings + 1] = {fontString = fs, colorKey = colorKey or "textPrimary"}
+    themedFontStrings[#themedFontStrings + 1] = {fontString = fs, role = fontKey or "body", colorKey = colorKey or "textPrimary"}
     if text then fs:SetText(text) end
     return fs
 end
