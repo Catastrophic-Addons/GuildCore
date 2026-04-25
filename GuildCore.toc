@@ -1,0 +1,54 @@
+## Interface: 120005
+## Title: Guild Core
+## Notes: Modern guild management suite for World of Warcraft (Retail).
+## Author: Catastrophie
+## Version: 0.4.0
+## SavedVariables: GuildCoreDB
+
+Data\Defaults.lua
+
+Core\Init.lua
+Core\API.lua
+Core\Registry.lua
+Core\Utils.lua
+Core\Database.lua
+Core\Migrations.lua
+Core\Permissions.lua
+Core\Events.lua
+
+Services\DataStore.lua
+Services\GuildService.lua
+
+Modules\Roster\Service.lua
+Modules\Roster\Scan.lua
+Modules\Roster\Diff.lua
+Modules\Roster\History.lua
+
+Modules\Bank\Service.lua
+
+Modules\Alts\Service.lua
+Modules\Points\Service.lua
+Modules\Messages\Module.lua
+Modules\Messages\Chunker.lua
+Modules\Messages\Placeholders.lua
+Modules\Messages\Service.lua
+Modules\Operations\Service.lua
+Modules\Sync\Service.lua
+
+UI\Theme.lua
+UI\Layering.lua
+UI\Components\Button.lua
+UI\Components\Panel.lua
+UI\Components\List.lua
+
+UI\MainFrame.lua
+UI\MinimapButton.lua
+UI\CommunityTab.lua
+UI\Dashboard.lua
+UI\RosterPanel.lua
+UI\PlayerPanel.lua
+UI\LogPanel.lua
+UI\MessagingPanel.lua
+UI\SettingsPanel.lua
+
+GuildCore.lua

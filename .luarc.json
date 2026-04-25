@@ -1,0 +1,78 @@
+{
+    "runtime": {
+        "version": "Lua 5.1"
+    },
+    "diagnostics": {
+        "globals": [
+            "C_AddOns",
+            "C_Container",
+            "C_GuildInfo",
+            "C_Item",
+            "C_Spell",
+            "C_Timer",
+
+            "CreateFrame",
+            "UIParent",
+            "SlashCmdList",
+
+            "IsInGuild",
+            "GetNumGuildMembers",
+            "GetGuildRosterInfo",
+            "GetGuildInfo",
+            "GetRealmName",
+            "GetNumGuildRanks",
+            "GuildRoster",
+            "SetGuildRosterShowOffline",
+            "GuildSetMOTD",
+
+            "GuildPromote",
+            "GuildDemote",
+            "GuildUninvite",
+            "InviteUnit",
+
+            "GuildBankFrame",
+            "MAX_GUILDBANK_TABS",
+            "QueryGuildBankLog",
+            "GetNumGuildBankTabs",
+            "GetNumGuildBankTransactions",
+            "GetGuildBankTransaction",
+            "GetNumGuildBankMoneyTransactions",
+            "GetGuildBankMoneyTransaction",
+            "GetGuildBankTabInfo",
+
+            "GetItemInfo",
+            "GetItemCount",
+            "GetContainerNumSlots",
+            "GetContainerItemInfo",
+            "PickupContainerItem",
+
+            "GetSpellInfo",
+            "IsSpellKnown",
+
+            "SendChatMessage",
+            "ChatFrame_SendTell",
+            "ChatFrame_OpenChat",
+
+            "GetCursorPosition",
+
+            "GameTooltip",
+            "GameFontNormal",
+            "ChatFontNormal",
+
+            "GetTime",
+
+            "strsplit",
+            "date",
+            "time",
+
+            "ReloadUI",
+
+            "GuildCoreDB",
+            "SLASH_GUILDCORE1",
+            "SLASH_GUILDCORE2"
+        ]
+    },
+    "workspace": {
+        "checkThirdParty": false
+    }
+}
