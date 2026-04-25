@@ -3,7 +3,7 @@ local addonName, ns = ...
 
 ns.Defaults = {
     meta = {
-        dbVersion = 6,
+        dbVersion = 8,
     },
     settings = {
         autoScanIntervalMinutes = 60,

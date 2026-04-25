@@ -18,7 +18,7 @@ end
 local function splitRaw(text, limit)
     local chunks = {}
     text = normalizeText(text)
-    limit = math.max(20, tonumber(limit) or 240)
+    limit = math.max(20, math.min(255, tonumber(limit) or 240))
 
     while #text > 0 do
         if #text <= limit then
@@ -87,7 +87,7 @@ end
 
 function Chunker:Split(text, options)
     options = options or {}
-    local limit = math.max(20, tonumber(options.limit) or 240)
+    local limit = math.max(20, math.min(255, tonumber(options.limit) or 240))
     local includeNumbers = options.includeNumbers ~= false
     local normalized = normalizeText(text)
     if trim(normalized) == "" then

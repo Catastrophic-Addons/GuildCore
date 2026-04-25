@@ -9,10 +9,15 @@ local MP = GC.UI.MessagingPanel
 
 local function T() return GC.UI.Theme end
 local function MS() return GC.Services.Messages end
+local function TB() return GC.Services.MessageTemplateBridge end
 local function DS() return GC.Services.DataStore end
 
 local MESSAGE_ROW_HEIGHT = 50
 local PREVIEW_ROW_HEIGHT = 58
+local HISTORY_ROW_HEIGHT = 40
+local DEFAULT_CHUNK_LIMIT = 240
+local MIN_CHUNK_LIMIT = 20
+local MAX_CHUNK_LIMIT = 255
 
 local function trim(value)
     return GC.Utils.Trim(value or "")
@@ -32,6 +37,17 @@ local function setEditBoxInteractive(editBox, enabled)
     if editBox.SetTextColor then
         local c = enabled and T().c.textPrimary or T().c.textDimmed
         editBox:SetTextColor(c[1], c[2], c[3], 1)
+    end
+end
+
+local function setFrameShown(frame, shown)
+    if not frame then
+        return
+    end
+    if shown then
+        frame:Show()
+    else
+        frame:Hide()
     end
 end
 
@@ -140,7 +156,12 @@ local function buildCategoryRow(row, item)
         row._count = countFs
     end
 
-    row._name:SetText((item.name or "General") .. (item.isDefault and " *" or ""))
+    local prefix = item.collapsed and "[+] " or ""
+    local suffix = item.isDefault and " *" or ""
+    if item.archived then
+        suffix = suffix .. " [Archived]"
+    end
+    row._name:SetText(prefix .. (item.name or "General") .. suffix)
     row._count:SetText(tostring(item.count or 0))
 end
 
@@ -251,21 +272,441 @@ function MP:DirectSendTemplate(messageId)
         return
     end
 
-    local success, sendErr, payload = svc:DirectSendMessage(messageId, self:GetResolveOptions())
-    if not success then
-        GC.UI.MainFrame:SetStatus(sendErr or "Unable to queue message.", "textDanger")
+    local message = svc:GetMessage(messageId)
+    local fallbackChannel = message and message.targetChannel or "GUILD"
+    if self.currentDraft and self.currentDraft.id ~= messageId then
+        self:SetSelectedChannel(fallbackChannel, false)
+    end
+
+    local outputOptions, optionsErr = self:GetOutputOptions(fallbackChannel)
+    if not outputOptions then
+        GC.UI.MainFrame:SetStatus(optionsErr or "Invalid target channel.", "textDanger")
         return
     end
 
-    self.previewData = payload and payload.preview or {}
-    self.selectedPreviewKey = self.previewData[1] and self.previewData[1].key or nil
-    self:Refresh()
-
-    if payload and payload.autoStarted then
-        GC.UI.MainFrame:SetStatus("Template queued and auto-send started.", "textSuccess")
-    else
-        GC.UI.MainFrame:SetStatus("Template queued in Manual Mode.", "textSuccess")
+    local payload, previewErr = svc:BuildMessagePreview(messageId, self:GetResolveOptions())
+    if not payload then
+        GC.UI.MainFrame:SetStatus(previewErr or "Unable to preview message.", "textDanger")
+        return
     end
+    self:SetPlaceholderWarnings(payload.placeholderWarnings or {})
+
+    local function runDirectSend()
+        local success, sendErr, sendPayload = svc:DirectSendMessage(messageId, self:GetResolveOptions())
+        if not success then
+            GC.UI.MainFrame:SetStatus(sendErr or "Unable to queue message.", "textDanger")
+            return
+        end
+
+        self.previewData = sendPayload and sendPayload.preview or payload.preview or {}
+        self.selectedPreviewKey = self.previewData[1] and self.previewData[1].key or nil
+        self:Refresh()
+
+        if sendPayload and sendPayload.autoStarted then
+            GC.UI.MainFrame:SetStatus("Template queued and auto-send started.", "textSuccess")
+        else
+            GC.UI.MainFrame:SetStatus("Template queued in Manual Mode.", "textSuccess")
+        end
+    end
+
+    outputOptions.chunkCount = #(payload.preview or {})
+    outputOptions.willAutoSend = svc:GetAutomationEnabled()
+    outputOptions.actionLabel = "template send"
+    outputOptions.callback = runDirectSend
+    self:RunWithOutputConfirmation(outputOptions)
+end
+
+function MP:GetTemplateFilterOptions()
+    return {
+        showArchived = self.showArchived == true,
+        favoritesOnly = self.favoritesOnly == true,
+        search = self.searchInput and self.searchInput:GetText() or "",
+    }
+end
+
+function MP:GetPlaceholderRows()
+    local svc = MS()
+    if svc and svc.GetAvailablePlaceholders then
+        local rows = svc:GetAvailablePlaceholders(self:GetResolveOptions())
+        if rows and #rows > 0 then
+            return rows
+        end
+    end
+
+    return {
+        { token = "@player.name", label = "Player Name", group = "Player" },
+        { token = "@guild.name", label = "Guild Name", group = "Guild" },
+        { token = "@realm.name", label = "Realm Name", group = "Guild" },
+        { token = "@target.name", label = "Target Name", group = "Target" },
+        { token = "@new.member", label = "New Member", group = "Target" },
+        { token = "@rank.name", label = "Rank Name", group = "Target" },
+        { token = "@discord.name", label = "Discord Name", group = "Target" },
+        { token = "@character.name", label = "Character Name", group = "Player" },
+        { token = "@main.name", label = "Main Name", group = "Target" },
+        { token = "@team.name", label = "Team Name", group = "Target" },
+        { token = "@role.name", label = "Role Name", group = "Target" },
+        { token = "@date.today", label = "Today", group = "Time" },
+        { token = "@time.now", label = "Current Time", group = "Time" },
+        { token = "@time.left", label = "Time Left", group = "Time" },
+    }
+end
+
+function MP:GetSelectedPlaceholder()
+    local rows = self:GetPlaceholderRows()
+    if #rows == 0 then
+        return nil
+    end
+
+    self.selectedPlaceholderIndex = math.max(1, math.min(#rows, tonumber(self.selectedPlaceholderIndex) or 1))
+    return rows[self.selectedPlaceholderIndex]
+end
+
+function MP:RefreshPlaceholderPicker()
+    local row = self:GetSelectedPlaceholder()
+    if self.placeholderPickerBtn then
+        self.placeholderPickerBtn:SetLabel(row and row.token or "Placeholder")
+        if row and self.placeholderPickerBtn.SetTooltip then
+            self.placeholderPickerBtn:SetTooltip(row.label or row.token, row.description or row.group or "")
+        end
+    end
+end
+
+function MP:CyclePlaceholder()
+    local rows = self:GetPlaceholderRows()
+    if #rows == 0 then
+        return
+    end
+
+    self.selectedPlaceholderIndex = (tonumber(self.selectedPlaceholderIndex) or 1) + 1
+    if self.selectedPlaceholderIndex > #rows then
+        self.selectedPlaceholderIndex = 1
+    end
+    self:RefreshPlaceholderPicker()
+end
+
+function MP:InsertSelectedPlaceholder()
+    local row = self:GetSelectedPlaceholder()
+    if not row or not self.bodyInput then
+        return
+    end
+
+    local token = row.token or row.key
+    if self.bodyInput.Insert then
+        self.bodyInput:SetFocus()
+        self.bodyInput:Insert(token)
+    else
+        self.bodyInput:SetText((self.bodyInput:GetText() or "") .. token)
+    end
+    if self.currentDraft then
+        self.currentDraft.dirty = true
+    end
+end
+
+function MP:SetPlaceholderWarnings(warnings)
+    self.placeholderWarnings = warnings or {}
+    if not self.placeholderWarningLabel then
+        return
+    end
+
+    if #self.placeholderWarnings == 0 then
+        self.placeholderWarningLabel:SetText("")
+        self.placeholderWarningLabel:Hide()
+        return
+    end
+
+    local text = self.placeholderWarnings[1]
+    if #self.placeholderWarnings > 1 then
+        text = text .. string.format(" (+%d more)", #self.placeholderWarnings - 1)
+    end
+    self.placeholderWarningLabel:SetText(text)
+    self.placeholderWarningLabel:Show()
+end
+
+function MP:ClearEditorInputs()
+    if self.titleInput then
+        self.titleInput:SetText("")
+    end
+    if self.notesInput then
+        self.notesInput:SetText("")
+    end
+    if self.bodyInput then
+        self.bodyInput:SetText("")
+    end
+    if self.bodyCountLabel then
+        self.bodyCountLabel:SetText("0 chars")
+    end
+end
+
+function MP:DuplicateSelectedMessage()
+    local svc = MS()
+    local draft = self:CollectDraft()
+    if not svc or not draft.id then
+        GC.UI.MainFrame:SetStatus("Select a saved message to duplicate.", "textWarn")
+        return
+    end
+
+    local message, err = svc:DuplicateMessage(draft.id)
+    if not message then
+        GC.UI.MainFrame:SetStatus(err or "Unable to duplicate message.", "textDanger")
+        return
+    end
+
+    self:LoadDraft(message)
+    self:Refresh()
+    GC.UI.MainFrame:SetStatus("Message duplicated.", "textSuccess")
+end
+
+function MP:ToggleSelectedFavorite()
+    local svc = MS()
+    local draft = self:CollectDraft()
+    if not svc or not draft.id then
+        GC.UI.MainFrame:SetStatus("Select a saved message first.", "textWarn")
+        return
+    end
+
+    local ok, err = svc:ToggleMessageFavorite(draft.id)
+    if not ok then
+        GC.UI.MainFrame:SetStatus(err or "Unable to update favorite.", "textDanger")
+        return
+    end
+
+    self:LoadDraft(svc:GetMessage(draft.id))
+    self:Refresh()
+end
+
+function MP:ToggleSelectedArchive()
+    local svc = MS()
+    local draft = self:CollectDraft()
+    if not svc or not draft.id then
+        GC.UI.MainFrame:SetStatus("Select a saved message first.", "textWarn")
+        return
+    end
+
+    local message = svc:GetMessage(draft.id)
+    local ok, err
+    if message and message.archived then
+        ok, err = svc:UnarchiveMessage(draft.id)
+    else
+        ok, err = svc:ArchiveMessage(draft.id)
+    end
+    if not ok then
+        GC.UI.MainFrame:SetStatus(err or "Unable to update archive state.", "textDanger")
+        return
+    end
+
+    local updated = svc:GetMessage(draft.id)
+    if updated and (self.showArchived or not updated.archived) then
+        self:LoadDraft(updated)
+    else
+        self:ResetDraft(svc:GetSelectedCategoryId() or "general")
+    end
+    self:Refresh()
+    GC.UI.MainFrame:SetStatus(updated and updated.archived and "Message archived." or "Message unarchived.", "textWarn")
+end
+
+function MP:PromptDeleteSelectedMessage()
+    local draft = self:CollectDraft()
+    if not draft.id then
+        GC.UI.MainFrame:SetStatus("Select a saved message to delete.", "textWarn")
+        return
+    end
+    self.pendingDeleteMessageId = draft.id
+    StaticPopup_Show("GUILDCORE_MESSAGES_DELETE_TEMPLATE", nil, nil, self)
+end
+
+function MP:ConfirmDeleteMessage()
+    local svc = MS()
+    local messageId = self.pendingDeleteMessageId
+    self.pendingDeleteMessageId = nil
+    if not svc or not messageId then
+        return
+    end
+
+    local ok, err = svc:DeleteMessage(messageId)
+    if not ok then
+        GC.UI.MainFrame:SetStatus(err or "Unable to delete message.", "textDanger")
+        return
+    end
+    self:ResetDraft(svc:GetSelectedCategoryId() or "general")
+    self:ClearEditorInputs()
+    self.previewData = {}
+    self.selectedPreviewKey = nil
+    self:SetPlaceholderWarnings({})
+    self:Refresh()
+    GC.UI.MainFrame:SetStatus("Message deleted.", "textWarn")
+end
+
+function MP:ToggleSelectedCategoryCollapsed()
+    local svc = MS()
+    local categoryId = svc and svc:GetSelectedCategoryId()
+    local ok, err = categoryId and svc:ToggleCategoryCollapsed(categoryId)
+    if not ok then
+        GC.UI.MainFrame:SetStatus(err or "Unable to collapse category.", "textWarn")
+        return
+    end
+    self:Refresh()
+end
+
+function MP:ToggleSelectedCategoryArchived()
+    local svc = MS()
+    local categoryId = svc and svc:GetSelectedCategoryId()
+    local category = categoryId and svc:GetCategory(categoryId)
+    local ok, err
+    if category and category.archived then
+        ok, err = svc:UnarchiveCategory(categoryId)
+    else
+        ok, err = svc:ArchiveCategory(categoryId)
+    end
+    if not ok then
+        GC.UI.MainFrame:SetStatus(err or "Unable to update category archive state.", "textDanger")
+        return
+    end
+    if not self.showArchived and category and not category.archived then
+        self:SelectCategory("general")
+    else
+        self:Refresh()
+    end
+end
+
+function MP:EnsureTemplateBridgeDialog()
+    if self.bridgeDialog then
+        return self.bridgeDialog
+    end
+
+    local Th = T()
+    local dialog = CreateFrame("Frame", nil, self.frame)
+    dialog:SetSize(560, 420)
+    dialog:SetPoint("CENTER", self.frame, "CENTER", 0, 0)
+    dialog:SetFrameStrata("DIALOG")
+    dialog:EnableMouse(true)
+    dialog:Hide()
+    Th.Bg(dialog, Th.c.panel, Th.c.borderStrong)
+
+    local title = Th.Fs(dialog, "header", "Template Bridge", "textPrimary")
+    title:SetPoint("TOPLEFT", 14, -14)
+    dialog.title = title
+
+    local info = Th.Fs(dialog, "small", "", "textDimmed")
+    info:SetPoint("TOPLEFT", title, "BOTTOMLEFT", 0, -8)
+    info:SetPoint("TOPRIGHT", dialog, "TOPRIGHT", -14, -42)
+    info:SetJustifyH("LEFT")
+    dialog.info = info
+
+    local holder, edit = createMultilineInput(dialog, 260)
+    holder:SetPoint("TOPLEFT", info, "BOTTOMLEFT", 0, -10)
+    holder:SetPoint("RIGHT", dialog, "RIGHT", -14, 0)
+    dialog.editHolder = holder
+    dialog.edit = edit
+
+    local summary = Th.Fs(dialog, "small", "", "textWarn")
+    summary:SetPoint("TOPLEFT", holder, "BOTTOMLEFT", 0, -8)
+    summary:SetPoint("TOPRIGHT", dialog, "TOPRIGHT", -14, 0)
+    summary:SetJustifyH("LEFT")
+    dialog.summary = summary
+
+    local validateBtn = GC.UI.Button.Create(dialog, "Validate", "secondary", 76, Th.btnH)
+    validateBtn:SetPoint("BOTTOMLEFT", dialog, "BOTTOMLEFT", 14, 14)
+    validateBtn:SetScript("OnClick", function()
+        self:ValidateTemplateImport()
+    end)
+    dialog.validateBtn = validateBtn
+
+    local importBtn = GC.UI.Button.Create(dialog, "Import", "success", 64, Th.btnH)
+    importBtn:SetPoint("LEFT", validateBtn, "RIGHT", 8, 0)
+    importBtn:SetScript("OnClick", function()
+        self:ConfirmTemplateImport()
+    end)
+    dialog.importBtn = importBtn
+
+    local closeBtn = GC.UI.Button.Create(dialog, "Close", "secondary", 64, Th.btnH)
+    closeBtn:SetPoint("BOTTOMRIGHT", dialog, "BOTTOMRIGHT", -14, 14)
+    closeBtn:SetScript("OnClick", function()
+        dialog:Hide()
+    end)
+    dialog.closeBtn = closeBtn
+
+    self.bridgeDialog = dialog
+    return dialog
+end
+
+function MP:ShowTemplateExport(messageIds)
+    local bridge = TB()
+    local text, err, count = bridge and bridge:ExportTemplates({ messageIds = messageIds })
+    if not text then
+        GC.UI.MainFrame:SetStatus(err or "Unable to export templates.", "textWarn")
+        return
+    end
+
+    local dialog = self:EnsureTemplateBridgeDialog()
+    dialog.mode = "export"
+    dialog.title:SetText("Export Templates")
+    dialog.info:SetText(string.format("%d template(s) exported. Select the text below and copy it manually.", count or 0))
+    dialog.summary:SetText("Usage history and player-sensitive state are not included.")
+    dialog.edit:SetText(text)
+    dialog.edit:HighlightText()
+    dialog.validateBtn:Hide()
+    dialog.importBtn:Hide()
+    dialog:Show()
+end
+
+function MP:ShowTemplateImport()
+    local dialog = self:EnsureTemplateBridgeDialog()
+    dialog.mode = "import"
+    dialog.title:SetText("Import Templates")
+    dialog.info:SetText("Paste a GuildCore template export below, validate it, then import. Existing templates are preserved; imports become local copies.")
+    dialog.summary:SetText("")
+    dialog.edit:SetText("")
+    dialog.validateBtn:Show()
+    dialog.importBtn:Show()
+    dialog.importBtn:SetEnabled(false)
+    dialog:Show()
+    dialog.edit:SetFocus()
+end
+
+function MP:ValidateTemplateImport()
+    local bridge = TB()
+    local dialog = self:EnsureTemplateBridgeDialog()
+    local summary, err = bridge and bridge:PreviewTemplateImport(dialog.edit:GetText() or "")
+    if not summary then
+        dialog.summary:SetText(err or "Import could not be validated.")
+        dialog.importBtn:SetEnabled(false)
+        return nil
+    end
+
+    local text = string.format(
+        "%d template(s), %d missing categor%s, %d duplicate title%s detected.",
+        summary.templateCount or 0,
+        summary.categoryCount or 0,
+        (summary.categoryCount or 0) == 1 and "y" or "ies",
+        summary.duplicateCount or 0,
+        (summary.duplicateCount or 0) == 1 and "" or "s"
+    )
+    if (summary.duplicateCount or 0) > 0 then
+        text = text .. " Duplicates will import as copies."
+    end
+    dialog.summary:SetText(text)
+    dialog.importBtn:SetEnabled(true)
+    return summary
+end
+
+function MP:ConfirmTemplateImport()
+    local summary = self:ValidateTemplateImport()
+    if not summary then
+        return
+    end
+
+    local bridge = TB()
+    local dialog = self:EnsureTemplateBridgeDialog()
+    local result, err = bridge and bridge:ImportTemplates(dialog.edit:GetText() or "")
+    if not result then
+        dialog.summary:SetText(err or "Import failed.")
+        return
+    end
+
+    dialog.summary:SetText(string.format("Imported %d template(s).", result.importedCount or 0))
+    dialog.importBtn:SetEnabled(false)
+    self:Refresh()
+    GC.UI.MainFrame:SetStatus("Templates imported.", "textSuccess")
 end
 
 local function buildMessageRow(row, item)
@@ -315,7 +756,14 @@ local function buildMessageRow(row, item)
         row._sub = subFs
     end
 
-    row._title:SetText(item.title or "Untitled Message")
+    local title = item.title or "Untitled Message"
+    if item.favorite then
+        title = "[Fav] " .. title
+    end
+    if item.archived then
+        title = title .. " [Archived]"
+    end
+    row._title:SetText(title)
     row._stamp:SetText(item.lastUsedLabel and ("Used " .. item.lastUsedLabel) or (item.updatedLabel and ("Updated " .. item.updatedLabel) or ""))
 
     local snippet = trim(item.notes ~= "" and item.notes or item.body or "")
@@ -323,6 +771,40 @@ local function buildMessageRow(row, item)
         snippet = snippet:sub(1, 37) .. "..."
     end
     row._sub:SetText(snippet ~= "" and snippet or "No notes")
+end
+
+local function buildHistoryRow(row, item)
+    local Th = T()
+    row._item = item
+
+    if not row._title then
+        local titleFs = Th.Fs(row, "tiny", "", "textPrimary")
+        titleFs:SetPoint("TOPLEFT", 6, -5)
+        titleFs:SetPoint("TOPRIGHT", -6, -5)
+        titleFs:SetJustifyH("LEFT")
+        row._title = titleFs
+
+        local metaFs = Th.Fs(row, "tiny", "", "textDimmed")
+        metaFs:SetPoint("BOTTOMLEFT", 6, 5)
+        metaFs:SetPoint("BOTTOMRIGHT", -6, 5)
+        metaFs:SetJustifyH("LEFT")
+        row._meta = metaFs
+    end
+
+    local title = trim(item.title or "")
+    if title == "" then
+        title = "Untitled Message"
+    end
+    if #title > 36 then
+        title = title:sub(1, 33) .. "..."
+    end
+    row._title:SetText(title)
+
+    local target = item.target or "GUILD"
+    if item.recipient and item.recipient ~= "" then
+        target = target .. " " .. item.recipient
+    end
+    row._meta:SetText(string.format("%s  %s  %d chunks", item.sentLabel or "", target, tonumber(item.chunkCount) or 1))
 end
 
 local function buildPreviewRow(row, item)
@@ -358,6 +840,159 @@ local function buildPreviewRow(row, item)
     row._text:SetText(text)
 end
 
+function MP:ClampChunkLimit(value)
+    value = tonumber(value) or DEFAULT_CHUNK_LIMIT
+    value = math.floor(value)
+    if value < MIN_CHUNK_LIMIT then
+        value = MIN_CHUNK_LIMIT
+    elseif value > MAX_CHUNK_LIMIT then
+        value = MAX_CHUNK_LIMIT
+    end
+    return value
+end
+
+function MP:GetChannelRows()
+    local svc = MS()
+    if not svc or not svc.GetSupportedChannels then
+        return {
+            { key = "GUILD", label = "Guild", chatPrefix = "/g ", requiresRecipient = false, risky = false },
+        }
+    end
+    return svc:GetSupportedChannels()
+end
+
+function MP:GetSelectedChannelKey(fallback)
+    local svc = MS()
+    local key = self.selectedChannelKey or fallback or "GUILD"
+    if svc and svc.NormalizeChannel then
+        return svc:NormalizeChannel(key)
+    end
+    return key or "GUILD"
+end
+
+function MP:GetSelectedChannelInfo(fallback)
+    local svc = MS()
+    local key = self:GetSelectedChannelKey(fallback)
+    return svc and svc:GetChannelInfo(key) or { key = key, label = key, chatPrefix = "/g ", requiresRecipient = false, risky = false }
+end
+
+function MP:SetSelectedChannel(channelKey, markDirty)
+    local info = self:GetSelectedChannelInfo(channelKey)
+    self.selectedChannelKey = info.key or "GUILD"
+    if self.currentDraft then
+        self.currentDraft.targetChannel = self.selectedChannelKey
+        if markDirty then
+            self.currentDraft.dirty = true
+        end
+    end
+    if self.channelBtn then
+        self.channelBtn:SetLabel(info.label or self.selectedChannelKey)
+    end
+    local needsRecipient = info.requiresRecipient == true
+    setFrameShown(self.recipientLabel, needsRecipient)
+    setFrameShown(self.recipientInput, needsRecipient)
+    if self.recipientInput then
+        setEditBoxInteractive(self.recipientInput, needsRecipient)
+    end
+end
+
+function MP:CycleChannel()
+    local rows = self:GetChannelRows()
+    if #rows == 0 then
+        self:SetSelectedChannel("GUILD", false)
+        return
+    end
+
+    local current = self:GetSelectedChannelKey()
+    local nextIndex = 1
+    for index, row in ipairs(rows) do
+        if row.key == current then
+            nextIndex = index + 1
+            break
+        end
+    end
+    if nextIndex > #rows then
+        nextIndex = 1
+    end
+
+    self:SetSelectedChannel(rows[nextIndex].key, true)
+    self:Refresh()
+end
+
+function MP:GetOutputOptions(fallbackChannel)
+    local svc = MS()
+    local options = {
+        target = self:GetSelectedChannelKey(fallbackChannel),
+        recipient = trim(self.recipientInput and self.recipientInput:GetText() or ""),
+    }
+    local ok, err, channel, normalized = svc and svc:ValidateChannelOptions(options)
+    if not ok then
+        return nil, err
+    end
+    normalized.channelInfo = channel
+    return normalized
+end
+
+function MP:NeedsOutputConfirmation(options, chunkCount)
+    local info = options and options.channelInfo
+    return (chunkCount or 0) > 3 or (info and info.risky == true)
+end
+
+function MP:PromptConfirmOutput(options)
+    self.pendingOutputConfirmation = options
+    local channel = options.channelInfo or { label = options.target or "Guild" }
+    local text = string.format(
+        "Confirm %s to %s?\nChunks: %d\nMode: %s",
+        options.actionLabel or "output",
+        channel.label or options.target or "Guild",
+        options.chunkCount or 0,
+        options.willAutoSend and "queue and auto-send" or "queue only"
+    )
+    StaticPopup_Show("GUILDCORE_MESSAGES_CONFIRM_OUTPUT", text, nil, self)
+end
+
+function MP:ConfirmPendingOutput()
+    local pending = self.pendingOutputConfirmation
+    self.pendingOutputConfirmation = nil
+    if pending and pending.callback then
+        pending.callback()
+    end
+end
+
+function MP:RunWithOutputConfirmation(options)
+    if self:NeedsOutputConfirmation(options, options.chunkCount) then
+        self:PromptConfirmOutput(options)
+        return
+    end
+    if options.callback then
+        options.callback()
+    end
+end
+
+function MP:GetQueuedOutputSummary()
+    local svc = MS()
+    local queue = svc and svc:GetQueue() or {}
+    local summary = {
+        chunkCount = #queue,
+        target = "GUILD",
+        channelInfo = svc and svc:GetChannelInfo("GUILD") or { key = "GUILD", label = "Guild", risky = false },
+    }
+
+    for _, row in ipairs(queue) do
+        local target = row.target or "GUILD"
+        local info = svc and svc:GetChannelInfo(target)
+        if info then
+            summary.target = info.key
+            summary.channelInfo = info
+            if info.risky then
+                return summary
+            end
+        end
+    end
+
+    return summary
+end
+
 function MP:ResetDraft(categoryId)
     local svc = MS()
     self.currentDraft = {
@@ -366,10 +1001,13 @@ function MP:ResetDraft(categoryId)
         notes = "",
         body = "",
         categoryId = categoryId or (svc and svc:GetSelectedCategoryId()) or "general",
+        targetChannel = "GUILD",
         dirty = false,
     }
+    self:SetSelectedChannel("GUILD", false)
     self.previewData = {}
     self.selectedPreviewKey = nil
+    self:SetPlaceholderWarnings({})
 end
 
 function MP:CollectDraft()
@@ -378,6 +1016,7 @@ function MP:CollectDraft()
     draft.notes = trim(self.notesInput and self.notesInput:GetText() or "")
     draft.body = self.bodyInput and self.bodyInput:GetText() or ""
     draft.categoryId = draft.categoryId or ((MS() and MS():GetSelectedCategoryId()) or "general")
+    draft.targetChannel = self:GetSelectedChannelKey(draft.targetChannel or "GUILD")
     self.currentDraft = draft
     return draft
 end
@@ -392,6 +1031,7 @@ function MP:LoadDraft(message)
         notes = message and message.notes or "",
         body = message and message.body or "",
         categoryId = categoryId,
+        targetChannel = message and message.targetChannel or "GUILD",
         dirty = false,
     }
 
@@ -399,8 +1039,10 @@ function MP:LoadDraft(message)
     self.notesInput:SetText(self.currentDraft.notes or "")
     self.bodyInput:SetText(self.currentDraft.body or "")
     self.bodyCountLabel:SetText(string.format("%d chars", #(self.currentDraft.body or "")))
+    self:SetSelectedChannel(self.currentDraft.targetChannel, false)
     self.previewData = {}
     self.selectedPreviewKey = nil
+    self:SetPlaceholderWarnings({})
 
     if svc then
         svc:SetSelectedCategory(categoryId)
@@ -421,10 +1063,7 @@ function MP:SelectCategory(categoryId)
         self:LoadDraft(selectedMessage)
     else
         self:ResetDraft(categoryId)
-        self.titleInput:SetText("")
-        self.notesInput:SetText("")
-        self.bodyInput:SetText("")
-        self.bodyCountLabel:SetText("0 chars")
+        self:ClearEditorInputs()
         svc:SetSelectedMessage(nil)
     end
 
@@ -434,12 +1073,16 @@ end
 function MP:GetResolveOptions()
     local svc = MS()
     local targetTime = svc and svc:GetDailyTargetTime() or { hour = 18, minute = 0 }
+    local outputOptions = self:GetOutputOptions()
+    local limit = self:ClampChunkLimit(self.limitInput and self.limitInput:GetText() or DEFAULT_CHUNK_LIMIT)
     return {
         targetName = self.targetInput and self.targetInput:GetText() or "",
         dailyTargetHour = targetTime.hour,
         dailyTargetMinute = targetTime.minute,
-        limit = tonumber(self.limitInput and self.limitInput:GetText() or "") or 240,
+        limit = limit,
         includeNumbers = true,
+        target = outputOptions and outputOptions.target or self:GetSelectedChannelKey(),
+        recipient = outputOptions and outputOptions.recipient or nil,
     }
 end
 
@@ -479,25 +1122,24 @@ end
 function MP:RefreshPreview()
     local svc = MS()
     if not svc then
-        return
+        return false
     end
 
     local ok, err = self:ApplyPlaceholderInputs()
     if not ok then
         GC.UI.MainFrame:SetStatus(err or "Invalid placeholder settings.", "textDanger")
-        return
+        return false
     end
 
-    local limit = tonumber(self.limitInput:GetText() or "") or 240
-    if limit < 20 then
-        limit = 20
-    end
+    local limit = self:ClampChunkLimit(self.limitInput:GetText() or DEFAULT_CHUNK_LIMIT)
     self.limitInput:SetText(tostring(limit))
 
     local draft = self:CollectDraft()
     self.previewData = svc:BuildPreview(draft.body, self:GetResolveOptions())
     self.selectedPreviewKey = self.previewData[1] and self.previewData[1].key or nil
+    self:SetPlaceholderWarnings(self.previewData.placeholderWarnings or {})
     self:Refresh()
+    return true
 end
 
 function MP:PromptEnableAutoMode()
@@ -505,6 +1147,25 @@ function MP:PromptEnableAutoMode()
 end
 
 function MP:PromptStartAutoSend()
+    local svc = MS()
+    local summary = self:GetQueuedOutputSummary()
+
+    summary.willAutoSend = true
+    summary.actionLabel = "auto-send"
+    summary.callback = function()
+        self:ConfirmStartAutoSend()
+    end
+
+    if svc and svc:IsAutoSending() then
+        GC.UI.MainFrame:SetStatus("Auto-send is already running.", "textWarn")
+        return
+    end
+
+    if self:NeedsOutputConfirmation(summary, summary.chunkCount) then
+        self:PromptConfirmOutput(summary)
+        return
+    end
+
     StaticPopup_Show("GUILDCORE_MESSAGES_START_AUTO", nil, nil, self)
 end
 
@@ -574,6 +1235,40 @@ function MP:Create(parent)
             OnAccept = function(_, data)
                 if data and data.ConfirmStartAutoSend then
                     data:ConfirmStartAutoSend()
+                end
+            end,
+            timeout = 0,
+            whileDead = 1,
+            hideOnEscape = 1,
+            preferredIndex = STATICPOPUP_NUMDIALOGS,
+        }
+    end
+
+    if not StaticPopupDialogs.GUILDCORE_MESSAGES_CONFIRM_OUTPUT then
+        StaticPopupDialogs.GUILDCORE_MESSAGES_CONFIRM_OUTPUT = {
+            text = "%s",
+            button1 = "Confirm",
+            button2 = "Cancel",
+            OnAccept = function(_, data)
+                if data and data.ConfirmPendingOutput then
+                    data:ConfirmPendingOutput()
+                end
+            end,
+            timeout = 0,
+            whileDead = 1,
+            hideOnEscape = 1,
+            preferredIndex = STATICPOPUP_NUMDIALOGS,
+        }
+    end
+
+    if not StaticPopupDialogs.GUILDCORE_MESSAGES_DELETE_TEMPLATE then
+        StaticPopupDialogs.GUILDCORE_MESSAGES_DELETE_TEMPLATE = {
+            text = "Delete this saved message template? This cannot be undone.",
+            button1 = "Delete",
+            button2 = "Cancel",
+            OnAccept = function(_, data)
+                if data and data.ConfirmDeleteMessage then
+                    data:ConfirmDeleteMessage()
                 end
             end,
             timeout = 0,
@@ -661,8 +1356,48 @@ function MP:Create(parent)
     end)
     self.categoryDeleteBtn = categoryDeleteBtn
 
+    local categoryUpBtn = GC.UI.Button.Create(categoriesContent, "Up", "secondary", 36, Th.btnH)
+    categoryUpBtn:SetPoint("TOPLEFT", categoryNewBtn, "BOTTOMLEFT", 0, -6)
+    categoryUpBtn:SetScript("OnClick", function()
+        local svc = MS()
+        local ok, err = svc and svc:MoveCategoryUp(svc:GetSelectedCategoryId())
+        if not ok then
+            GC.UI.MainFrame:SetStatus(err or "Unable to move category.", "textWarn")
+            return
+        end
+        self:Refresh()
+    end)
+    self.categoryUpBtn = categoryUpBtn
+
+    local categoryDownBtn = GC.UI.Button.Create(categoriesContent, "Down", "secondary", 48, Th.btnH)
+    categoryDownBtn:SetPoint("LEFT", categoryUpBtn, "RIGHT", 6, 0)
+    categoryDownBtn:SetScript("OnClick", function()
+        local svc = MS()
+        local ok, err = svc and svc:MoveCategoryDown(svc:GetSelectedCategoryId())
+        if not ok then
+            GC.UI.MainFrame:SetStatus(err or "Unable to move category.", "textWarn")
+            return
+        end
+        self:Refresh()
+    end)
+    self.categoryDownBtn = categoryDownBtn
+
+    local categoryCollapseBtn = GC.UI.Button.Create(categoriesContent, "Collapse", "secondary", 68, Th.btnH)
+    categoryCollapseBtn:SetPoint("LEFT", categoryDownBtn, "RIGHT", 6, 0)
+    categoryCollapseBtn:SetScript("OnClick", function()
+        self:ToggleSelectedCategoryCollapsed()
+    end)
+    self.categoryCollapseBtn = categoryCollapseBtn
+
+    local categoryArchiveBtn = GC.UI.Button.Create(categoriesContent, "Archive", "secondary", 70, Th.btnH)
+    categoryArchiveBtn:SetPoint("TOPLEFT", categoryUpBtn, "BOTTOMLEFT", 0, -6)
+    categoryArchiveBtn:SetScript("OnClick", function()
+        self:ToggleSelectedCategoryArchived()
+    end)
+    self.categoryArchiveBtn = categoryArchiveBtn
+
     local categoryListFrame = CreateFrame("Frame", nil, categoriesContent)
-    categoryListFrame:SetPoint("TOPLEFT", categoryNewBtn, "BOTTOMLEFT", 0, -12)
+    categoryListFrame:SetPoint("TOPLEFT", categoryArchiveBtn, "BOTTOMLEFT", 0, -12)
     categoryListFrame:SetPoint("BOTTOMRIGHT", categoriesContent, "BOTTOMRIGHT", 0, 0)
     self.categoryList = GC.UI.List.Create(categoryListFrame, 28, buildCategoryRow, function(item)
         self.categoryInput:SetText(item.name or "")
@@ -680,15 +1415,13 @@ function MP:Create(parent)
     messageNewBtn:SetScript("OnClick", function()
         local svc = MS()
         self:ResetDraft(svc and svc:GetSelectedCategoryId() or "general")
-        self.titleInput:SetText("")
-        self.notesInput:SetText("")
-        self.bodyInput:SetText("")
-        self.bodyCountLabel:SetText("0 chars")
+        self:ClearEditorInputs()
         if svc then
             svc:SetSelectedMessage(nil)
         end
         self.previewData = {}
         self.selectedPreviewKey = nil
+        self:SetPlaceholderWarnings({})
         self:Refresh()
     end)
     self.messageNewBtn = messageNewBtn
@@ -696,26 +1429,7 @@ function MP:Create(parent)
     local messageDeleteBtn = GC.UI.Button.Create(templatesContent, "Delete", "danger", 58, Th.btnH)
     messageDeleteBtn:SetPoint("LEFT", messageNewBtn, "RIGHT", 6, 0)
     messageDeleteBtn:SetScript("OnClick", function()
-        local svc = MS()
-        local draft = self:CollectDraft()
-        if not draft.id then
-            GC.UI.MainFrame:SetStatus("Select a saved message to delete.", "textWarn")
-            return
-        end
-        local ok, err = svc and svc:DeleteMessage(draft.id)
-        if not ok then
-            GC.UI.MainFrame:SetStatus(err or "Unable to delete message.", "textDanger")
-            return
-        end
-        self:ResetDraft(svc and svc:GetSelectedCategoryId() or "general")
-        self.titleInput:SetText("")
-        self.notesInput:SetText("")
-        self.bodyInput:SetText("")
-        self.bodyCountLabel:SetText("0 chars")
-        self.previewData = {}
-        self.selectedPreviewKey = nil
-        self:Refresh()
-        GC.UI.MainFrame:SetStatus("Message deleted.", "textWarn")
+        self:PromptDeleteSelectedMessage()
     end)
     self.messageDeleteBtn = messageDeleteBtn
 
@@ -804,8 +1518,84 @@ function MP:Create(parent)
     end)
     self.saveBtn = saveBtn
 
+    local duplicateBtn = GC.UI.Button.Create(templatesContent, "Duplicate", "secondary", 76, Th.btnH)
+    duplicateBtn:SetPoint("TOPLEFT", moveHereBtn, "BOTTOMLEFT", 0, -8)
+    duplicateBtn:SetScript("OnClick", function()
+        self:DuplicateSelectedMessage()
+    end)
+    self.duplicateBtn = duplicateBtn
+
+    local favoriteBtn = GC.UI.Button.Create(templatesContent, "Favorite", "secondary", 68, Th.btnH)
+    favoriteBtn:SetPoint("LEFT", duplicateBtn, "RIGHT", 6, 0)
+    favoriteBtn:SetScript("OnClick", function()
+        self:ToggleSelectedFavorite()
+    end)
+    self.favoriteBtn = favoriteBtn
+
+    local archiveBtn = GC.UI.Button.Create(templatesContent, "Archive", "secondary", 64, Th.btnH)
+    archiveBtn:SetPoint("LEFT", favoriteBtn, "RIGHT", 6, 0)
+    archiveBtn:SetScript("OnClick", function()
+        self:ToggleSelectedArchive()
+    end)
+    self.archiveBtn = archiveBtn
+
+    local searchLabel = Th.Fs(templatesContent, "tiny", "Search", "textDimmed")
+    searchLabel:SetPoint("TOPLEFT", duplicateBtn, "BOTTOMLEFT", 0, -8)
+
+    local searchInput = GC.UI.Panel.Input(templatesContent, 126, Th.inputH)
+    searchInput:SetPoint("LEFT", searchLabel, "RIGHT", 6, 0)
+    searchInput:SetScript("OnTextChanged", function()
+        self:Refresh()
+    end)
+    self.searchInput = searchInput
+
+    local showArchivedBtn = GC.UI.Button.Create(templatesContent, "Archived: Off", "secondary", 92, Th.btnH)
+    showArchivedBtn:SetPoint("TOPLEFT", searchLabel, "BOTTOMLEFT", 0, -8)
+    showArchivedBtn:SetScript("OnClick", function()
+        self.showArchived = not self.showArchived
+        self:Refresh()
+    end)
+    self.showArchivedBtn = showArchivedBtn
+
+    local favoritesOnlyBtn = GC.UI.Button.Create(templatesContent, "Favs: Off", "secondary", 76, Th.btnH)
+    favoritesOnlyBtn:SetPoint("LEFT", showArchivedBtn, "RIGHT", 6, 0)
+    favoritesOnlyBtn:SetScript("OnClick", function()
+        self.favoritesOnly = not self.favoritesOnly
+        self:Refresh()
+    end)
+    self.favoritesOnlyBtn = favoritesOnlyBtn
+
+    local exportBtn = GC.UI.Button.Create(templatesContent, "Export", "secondary", 58, Th.btnH)
+    exportBtn:SetPoint("TOPLEFT", showArchivedBtn, "BOTTOMLEFT", 0, -8)
+    exportBtn:SetTooltip("Export Selected", "Shows a copyable export for the selected saved template.")
+    exportBtn:SetScript("OnClick", function()
+        local draft = self:CollectDraft()
+        if not draft.id then
+            GC.UI.MainFrame:SetStatus("Select a saved message to export.", "textWarn")
+            return
+        end
+        self:ShowTemplateExport({ draft.id })
+    end)
+    self.exportBtn = exportBtn
+
+    local exportAllBtn = GC.UI.Button.Create(templatesContent, "Export All", "secondary", 76, Th.btnH)
+    exportAllBtn:SetPoint("LEFT", exportBtn, "RIGHT", 6, 0)
+    exportAllBtn:SetTooltip("Export All", "Shows a copyable export for all saved templates in this guild.")
+    exportAllBtn:SetScript("OnClick", function()
+        self:ShowTemplateExport()
+    end)
+    self.exportAllBtn = exportAllBtn
+
+    local importBtn = GC.UI.Button.Create(templatesContent, "Import", "secondary", 58, Th.btnH)
+    importBtn:SetPoint("LEFT", exportAllBtn, "RIGHT", 6, 0)
+    importBtn:SetTooltip("Import Templates", "Validates and imports pasted GuildCore template exports as new local templates.")
+    importBtn:SetScript("OnClick", function()
+        self:ShowTemplateImport()
+    end)
+    self.importBtn = importBtn
+
     local messageListFrame = CreateFrame("Frame", nil, templatesContent)
-    messageListFrame:SetPoint("TOPLEFT", moveHereBtn, "BOTTOMLEFT", 0, -12)
+    messageListFrame:SetPoint("TOPLEFT", exportBtn, "BOTTOMLEFT", 0, -12)
     messageListFrame:SetPoint("BOTTOMRIGHT", templatesContent, "BOTTOMRIGHT", 0, 0)
     self.messageList = GC.UI.List.Create(messageListFrame, MESSAGE_ROW_HEIGHT, buildMessageRow, function(item)
         local svc = MS()
@@ -897,6 +1687,22 @@ function MP:Create(parent)
     local bodyLabel = Th.Fs(editorContent, "tiny", "Message Body", "textDimmed")
     bodyLabel:SetPoint("TOPLEFT", notesInput, "BOTTOMLEFT", 0, -14)
 
+    local placeholderPickerBtn = GC.UI.Button.Create(editorContent, "@player.name", "secondary", 112, Th.btnH)
+    placeholderPickerBtn:SetPoint("LEFT", bodyLabel, "RIGHT", 12, 0)
+    placeholderPickerBtn:SetTooltip("Placeholder Picker", "Cycles through available placeholders.")
+    placeholderPickerBtn:SetScript("OnClick", function()
+        self:CyclePlaceholder()
+    end)
+    self.placeholderPickerBtn = placeholderPickerBtn
+
+    local insertPlaceholderBtn = GC.UI.Button.Create(editorContent, "Insert", "secondary", 54, Th.btnH)
+    insertPlaceholderBtn:SetPoint("LEFT", placeholderPickerBtn, "RIGHT", 6, 0)
+    insertPlaceholderBtn:SetTooltip("Insert Placeholder", "Inserts the selected placeholder into the message body at the cursor.")
+    insertPlaceholderBtn:SetScript("OnClick", function()
+        self:InsertSelectedPlaceholder()
+    end)
+    self.insertPlaceholderBtn = insertPlaceholderBtn
+
     local bodyHolder, bodyInput = createMultilineInput(editorContent, 210)
     bodyHolder:SetPoint("TOPLEFT", bodyLabel, "BOTTOMLEFT", 0, -6)
     bodyHolder:SetPoint("BOTTOMRIGHT", editorContent, "BOTTOMRIGHT", 0, 0)
@@ -920,11 +1726,43 @@ function MP:Create(parent)
     previewInfoFs:SetPoint("TOPRIGHT", previewContent, "TOPRIGHT", 0, 0)
     previewInfoFs:SetJustifyH("LEFT")
 
-    local placeholderFs = Th.Fs(previewContent, "tiny", "@player.name  @guild.name  @realm.name  @target.name  @new.member  @time.left", "textDimmed")
+    local placeholderFs = Th.Fs(previewContent, "tiny", "@player.name  @guild.name  @target.name  @discord.name  @main.name  @role.name  @date.today  @time.now", "textDimmed")
     placeholderFs:SetPoint("TOPLEFT", previewInfoFs, "BOTTOMLEFT", 0, -6)
+    self.placeholderHintLabel = placeholderFs
+
+    local placeholderWarningFs = Th.Fs(previewContent, "tiny", "", "textWarn")
+    placeholderWarningFs:SetPoint("TOPLEFT", placeholderFs, "BOTTOMLEFT", 0, -4)
+    placeholderWarningFs:SetPoint("TOPRIGHT", previewContent, "TOPRIGHT", 0, 0)
+    placeholderWarningFs:SetJustifyH("LEFT")
+    placeholderWarningFs:Hide()
+    self.placeholderWarningLabel = placeholderWarningFs
+
+    local channelLabel = Th.Fs(previewContent, "tiny", "Channel", "textDimmed")
+    channelLabel:SetPoint("TOPLEFT", placeholderWarningFs, "BOTTOMLEFT", 0, -8)
+
+    local channelBtn = GC.UI.Button.Create(previewContent, "Guild", "secondary", 74, Th.btnH)
+    channelBtn:SetPoint("LEFT", channelLabel, "RIGHT", 6, 0)
+    channelBtn:SetTooltip("Target Channel", "Cycles the channel used when queueing, sending, or loading chunks.")
+    channelBtn:SetScript("OnClick", function()
+        self:CycleChannel()
+    end)
+    self.channelBtn = channelBtn
+
+    local recipientLabel = Th.Fs(previewContent, "tiny", "Recipient", "textDimmed")
+    recipientLabel:SetPoint("LEFT", channelBtn, "RIGHT", 14, 0)
+    self.recipientLabel = recipientLabel
+
+    local recipientInput = GC.UI.Panel.Input(previewContent, 110, Th.inputH)
+    recipientInput:SetPoint("LEFT", recipientLabel, "RIGHT", 6, 0)
+    recipientInput:SetScript("OnTextChanged", function()
+        if self.currentDraft then
+            self.currentDraft.dirty = true
+        end
+    end)
+    self.recipientInput = recipientInput
 
     local targetLabel = Th.Fs(previewContent, "tiny", "Target", "textDimmed")
-    targetLabel:SetPoint("TOPLEFT", placeholderFs, "BOTTOMLEFT", 0, -10)
+    targetLabel:SetPoint("TOPLEFT", channelLabel, "BOTTOMLEFT", 0, -10)
 
     local targetInput = GC.UI.Panel.Input(previewContent, 108, Th.inputH)
     targetInput:SetPoint("LEFT", targetLabel, "RIGHT", 6, 0)
@@ -963,21 +1801,38 @@ function MP:Create(parent)
     queuePreviewBtn:SetTooltip("Queue Preview", "Queues the currently previewed chunks without sending them immediately.")
     queuePreviewBtn:SetScript("OnClick", function()
         local svc = MS()
-        self:RefreshPreview()
+        if not self:RefreshPreview() then
+            return
+        end
         if #(self.previewData or {}) == 0 then
             GC.UI.MainFrame:SetStatus("Nothing to queue. Add message text first.", "textWarn")
             return
         end
-        local ok, err = svc and svc:QueueChunks(self.previewData, {
-            target = "GUILD",
-            sourceMessageId = self.currentDraft and self.currentDraft.id or nil,
-        })
-        if not ok then
-            GC.UI.MainFrame:SetStatus(err or "Unable to queue preview chunks.", "textDanger")
+        local outputOptions, optionsErr = self:GetOutputOptions()
+        if not outputOptions then
+            GC.UI.MainFrame:SetStatus(optionsErr or "Invalid target channel.", "textDanger")
             return
         end
-        self:Refresh()
-        GC.UI.MainFrame:SetStatus("Preview queued.", "textSuccess")
+
+        local function queuePreview()
+            local ok, err = svc and svc:QueueChunks(self.previewData, {
+                target = outputOptions.target,
+                recipient = outputOptions.recipient,
+                sourceMessageId = self.currentDraft and self.currentDraft.id or nil,
+            })
+            if not ok then
+                GC.UI.MainFrame:SetStatus(err or "Unable to queue preview chunks.", "textDanger")
+                return
+            end
+            self:Refresh()
+            GC.UI.MainFrame:SetStatus("Preview queued.", "textSuccess")
+        end
+
+        outputOptions.chunkCount = #(self.previewData or {})
+        outputOptions.willAutoSend = false
+        outputOptions.actionLabel = "queue"
+        outputOptions.callback = queuePreview
+        self:RunWithOutputConfirmation(outputOptions)
     end)
     self.queuePreviewBtn = queuePreviewBtn
 
@@ -986,17 +1841,33 @@ function MP:Create(parent)
     loadChunkBtn:SetTooltip("Load First/Selected Chunk", "Loads the selected chunk into the chat edit box instead of sending it immediately.")
     loadChunkBtn:SetScript("OnClick", function()
         local svc = MS()
-        self:RefreshPreview()
+        if not self:RefreshPreview() then
+            return
+        end
         local chunk = self:GetSelectedPreviewChunk()
         if not chunk then
             GC.UI.MainFrame:SetStatus("Preview a message first.", "textWarn")
             return
         end
-        local ok, err = svc and svc:LoadChunkIntoChat(chunk.text, "GUILD")
+        local outputOptions, optionsErr = self:GetOutputOptions()
+        if not outputOptions then
+            GC.UI.MainFrame:SetStatus(optionsErr or "Invalid target channel.", "textDanger")
+            return
+        end
+        local ok, err = svc and svc:LoadChunkIntoChat(chunk.text, outputOptions)
         if not ok then
             GC.UI.MainFrame:SetStatus(err or "Unable to load chunk into chat.", "textDanger")
             return
         end
+        if self.currentDraft and self.currentDraft.id and svc and svc.RecordMessageUsage then
+            svc:RecordMessageUsage(self.currentDraft.id, {
+                target = outputOptions.target,
+                recipient = outputOptions.recipient,
+                sentAt = time(),
+                chunkCount = #(self.previewData or {}),
+            })
+        end
+        self:Refresh()
         GC.UI.MainFrame:SetStatus("Chunk loaded into chat input.", "textSuccess")
     end)
     self.loadChunkBtn = loadChunkBtn
@@ -1071,6 +1942,7 @@ function MP:Create(parent)
         end
         self.previewData = {}
         self.selectedPreviewKey = nil
+        self:SetPlaceholderWarnings({})
         self:Refresh()
         GC.UI.MainFrame:SetStatus("Queue cleared.", "textWarn")
     end)
@@ -1090,12 +1962,23 @@ function MP:Create(parent)
 
     local previewListFrame = CreateFrame("Frame", nil, previewContent)
     previewListFrame:SetPoint("TOPLEFT", sendNextBtn, "BOTTOMLEFT", 0, -10)
-    previewListFrame:SetPoint("BOTTOMRIGHT", previewContent, "BOTTOMRIGHT", 0, 0)
+    previewListFrame:SetPoint("BOTTOMRIGHT", previewContent, "BOTTOMRIGHT", -210, 0)
     self.previewList = GC.UI.List.Create(previewListFrame, PREVIEW_ROW_HEIGHT, buildPreviewRow, function(item)
         self.selectedPreviewKey = item.key
     end)
     self.previewList:SetEmptyText("No preview yet. Enter or select a message and click Preview.")
 
+    local historyLabel = Th.Fs(previewContent, "tiny", "Recent History", "textDimmed")
+    historyLabel:SetPoint("TOPLEFT", previewListFrame, "TOPRIGHT", 12, 0)
+    self.historyLabel = historyLabel
+
+    local historyListFrame = CreateFrame("Frame", nil, previewContent)
+    historyListFrame:SetPoint("TOPLEFT", historyLabel, "BOTTOMLEFT", 0, -6)
+    historyListFrame:SetPoint("BOTTOMRIGHT", previewContent, "BOTTOMRIGHT", 0, 0)
+    self.historyList = GC.UI.List.Create(historyListFrame, HISTORY_ROW_HEIGHT, buildHistoryRow)
+    self.historyList:SetEmptyText("No history yet.")
+
+    self:RefreshPlaceholderPicker()
     self:ResetDraft("general")
 end
 
@@ -1118,16 +2001,22 @@ function MP:Refresh()
     self.disabledBanner:SetShown(disabled)
 
     local selectedCategoryId = svc:GetSelectedCategoryId() or "general"
-    local categories = svc:ListCategories()
+    local selectedCategory = svc:GetCategory(selectedCategoryId) or { name = "General" }
+    if selectedCategory.archived and not self.showArchived then
+        svc:SetSelectedCategory("general")
+        svc:SetSelectedMessage(nil)
+        selectedCategoryId = "general"
+        selectedCategory = svc:GetCategory(selectedCategoryId) or { name = "General" }
+    end
+    local categories = svc:ListCategories({ showArchived = self.showArchived == true })
     self.categoryList:SetSelected(selectedCategoryId)
     self.categoryList:Refresh(categories)
 
-    local selectedCategory = svc:GetCategory(selectedCategoryId) or { name = "General" }
     if not self.categoryInput:HasFocus() then
         self.categoryInput:SetText(selectedCategory.name or "General")
     end
 
-    self.visibleMessages = svc:ListMessages(selectedCategoryId)
+    self.visibleMessages = svc:ListMessages(selectedCategoryId, self:GetTemplateFilterOptions())
     local selectedMessageId = self.currentDraft and self.currentDraft.id or svc:GetSelectedMessageId()
     self.messageList:SetSelected(selectedMessageId)
     self.messageList:Refresh(self.visibleMessages)
@@ -1143,8 +2032,8 @@ function MP:Refresh()
         self.delayInput:SetText(string.format("%.1f", svc:GetAutoSendDelaySeconds()))
     end
     if not self.limitInput:HasFocus() then
-        local currentLimit = tonumber(self.limitInput:GetText() or "") or 240
-        self.limitInput:SetText(tostring(math.max(20, currentLimit)))
+        local currentLimit = self:ClampChunkLimit(self.limitInput:GetText() or DEFAULT_CHUNK_LIMIT)
+        self.limitInput:SetText(tostring(currentLimit))
     end
 
     if self.currentDraft then
@@ -1154,6 +2043,9 @@ function MP:Refresh()
 
     self.previewList:SetSelected(self.selectedPreviewKey)
     self.previewList:Refresh(self.previewData or {})
+    if self.historyList then
+        self.historyList:Refresh(svc:ListHistory(6))
+    end
 
     local queueSize = svc:GetQueueSize()
     local draft = self.currentDraft or {}
@@ -1161,22 +2053,56 @@ function MP:Refresh()
     local hasPreview = #(self.previewData or {}) > 0
     local autoEnabled = svc:GetAutomationEnabled()
     local autoSending = svc:IsAutoSending()
+    local selectedMessage = draft.id and svc:GetMessage(draft.id) or nil
+    local queueReport = svc.ValidateQueue and svc:ValidateQueue() or nil
 
-    self.queueCountLabel:SetText(string.format("%d queued", queueSize))
+    if queueReport and (queueReport.invalidCount or 0) > 0 then
+        self.queueCountLabel:SetText(string.format("%d queued (%d invalid)", queueSize, queueReport.invalidCount))
+    else
+        self.queueCountLabel:SetText(string.format("%d queued", queueSize))
+    end
     self.previewCountLabel:SetText(string.format("%d chunks", #(self.previewData or {})))
     self.autoStatusLabel:SetText(svc:GetAutoSendStatus())
     self.modeBtn:SetLabel(autoEnabled and "Mode: Auto" or "Mode: Manual")
+    self.showArchivedBtn:SetLabel(self.showArchived and "Archived: On" or "Archived: Off")
+    self.favoritesOnlyBtn:SetLabel(self.favoritesOnly and "Favs: On" or "Favs: Off")
+    self:RefreshPlaceholderPicker()
+    self:SetPlaceholderWarnings(self.placeholderWarnings or {})
+    if self.channelBtn then
+        local info = self:GetSelectedChannelInfo()
+        self.channelBtn:SetLabel(info.label or self:GetSelectedChannelKey())
+        setFrameShown(self.recipientLabel, info.requiresRecipient == true)
+        setFrameShown(self.recipientInput, info.requiresRecipient == true)
+    end
 
     self.categoryNewBtn:SetEnabled(not disabled)
     self.categoryRenameBtn:SetEnabled(not disabled)
     self.categoryDeleteBtn:SetEnabled(not disabled and selectedCategoryId ~= "general")
+    self.categoryUpBtn:SetEnabled(not disabled and selectedCategoryId ~= nil and #categories > 1)
+    self.categoryDownBtn:SetEnabled(not disabled and selectedCategoryId ~= nil and #categories > 1)
+    self.categoryCollapseBtn:SetEnabled(not disabled and selectedCategoryId ~= nil)
+    self.categoryCollapseBtn:SetLabel(selectedCategory.collapsed and "Expand" or "Collapse")
+    self.categoryArchiveBtn:SetEnabled(not disabled and selectedCategoryId ~= "general")
+    self.categoryArchiveBtn:SetLabel(selectedCategory.archived and "Unarchive" or "Archive")
     self.messageNewBtn:SetEnabled(not disabled)
     self.messageDeleteBtn:SetEnabled(not disabled and hasSavedMessage)
+    self.duplicateBtn:SetEnabled(not disabled and hasSavedMessage)
+    self.favoriteBtn:SetEnabled(not disabled and hasSavedMessage)
+    self.favoriteBtn:SetLabel((selectedMessage and selectedMessage.favorite) and "Unfavorite" or "Favorite")
+    self.archiveBtn:SetEnabled(not disabled and hasSavedMessage)
+    self.archiveBtn:SetLabel((selectedMessage and selectedMessage.archived) and "Unarchive" or "Archive")
+    self.showArchivedBtn:SetEnabled(not disabled)
+    self.favoritesOnlyBtn:SetEnabled(not disabled)
+    self.exportBtn:SetEnabled(not disabled and hasSavedMessage)
+    self.exportAllBtn:SetEnabled(not disabled)
+    self.importBtn:SetEnabled(not disabled)
     self.moveUpBtn:SetEnabled(not disabled and hasSavedMessage and #self.visibleMessages > 1)
     self.moveDownBtn:SetEnabled(not disabled and hasSavedMessage and #self.visibleMessages > 1)
     self.moveHereBtn:SetEnabled(not disabled and hasSavedMessage)
     self.saveBtn:SetEnabled(not disabled)
     self.assignSelectedBtn:SetEnabled(not disabled)
+    self.placeholderPickerBtn:SetEnabled(not disabled)
+    self.insertPlaceholderBtn:SetEnabled(not disabled)
     self.previewBtn:SetEnabled(not disabled)
     self.queuePreviewBtn:SetEnabled(not disabled and hasPreview)
     self.loadChunkBtn:SetEnabled(not disabled and hasPreview)
@@ -1185,6 +2111,7 @@ function MP:Refresh()
     self.stopAutoBtn:SetEnabled(not disabled and autoSending)
     self.clearQueueBtn:SetEnabled(not disabled and queueSize > 0)
     self.modeBtn:SetEnabled(not disabled)
+    self.channelBtn:SetEnabled(not disabled)
 
     setEditBoxInteractive(self.titleInput, not disabled)
     setEditBoxInteractive(self.notesInput, not disabled)
@@ -1193,4 +2120,6 @@ function MP:Refresh()
     setEditBoxInteractive(self.timeInput, not disabled)
     setEditBoxInteractive(self.delayInput, not disabled)
     setEditBoxInteractive(self.limitInput, not disabled)
+    setEditBoxInteractive(self.recipientInput, not disabled and self:GetSelectedChannelInfo().requiresRecipient == true)
+    setEditBoxInteractive(self.searchInput, not disabled)
 end

@@ -4,7 +4,42 @@ local GC = ns.GuildCore
 
 GC.Migrations = {}
 
+local function trim(value)
+    return GC.Utils.Trim(value or "")
+end
+
+local function currentPlayerName()
+    local name = UnitName and UnitName("player") or nil
+    name = trim(name)
+    if name == "" then
+        return nil
+    end
+    return name
+end
+
+local function normalizeTargetChannel(channelId)
+    channelId = tostring(channelId or "GUILD"):upper()
+    if channelId == "INSTANCE" then
+        channelId = "INSTANCE_CHAT"
+    end
+
+    local supported = {
+        GUILD = true,
+        OFFICER = true,
+        WHISPER = true,
+        SAY = true,
+        YELL = true,
+        PARTY = true,
+        RAID = true,
+        INSTANCE_CHAT = true,
+    }
+    return supported[channelId] and channelId or "GUILD"
+end
+
 local function ensureMessagesState(guild)
+    if type(guild.messageHistory) ~= "table" then
+        guild.messageHistory = {}
+    end
     guild.messages = guild.messages or {}
     guild.messages.meta = guild.messages.meta or {}
     guild.messages.meta.nextMessageId = tonumber(guild.messages.meta.nextMessageId) or 1
@@ -29,6 +64,10 @@ local function ensureMessagesState(guild)
             name = "General",
             createdAt = time(),
             updatedAt = time(),
+            archived = false,
+            collapsed = false,
+            color = nil,
+            icon = nil,
         }
     else
         guild.messages.categories.general.id = "general"
@@ -37,19 +76,71 @@ local function ensureMessagesState(guild)
         guild.messages.categories.general.updatedAt = guild.messages.categories.general.updatedAt or guild.messages.categories.general.createdAt
     end
 
+    for categoryId, category in pairs(guild.messages.categories or {}) do
+        if type(category) == "table" then
+            category.id = category.id or categoryId
+            category.archived = category.archived == true
+            category.collapsed = category.collapsed == true
+            if category.color ~= nil and type(category.color) ~= "table" and type(category.color) ~= "string" then
+                category.color = nil
+            end
+            if category.icon ~= nil and type(category.icon) ~= "string" then
+                category.icon = nil
+            end
+        end
+    end
+
     if not GC.Utils.ArrayContains(guild.messages.categoryOrder, "general") then
         table.insert(guild.messages.categoryOrder, 1, "general")
     end
 
     guild.messages.messageOrderByCategory.general = guild.messages.messageOrderByCategory.general or {}
 
+    local actor = currentPlayerName()
     for messageId, message in pairs(guild.messages.messages or {}) do
         if type(message) == "table" then
             message.id = tostring(message.id or messageId)
             message.lastUsedAt = tonumber(message.lastUsedAt) or nil
             message.notes = tostring(message.notes or "")
             message.body = tostring(message.body or "")
+            message.targetChannel = normalizeTargetChannel(message.targetChannel)
+            if type(message.tags) ~= "table" then
+                message.tags = {}
+            end
+            message.usageCount = math.max(0, math.floor(tonumber(message.usageCount) or 0))
+            if message.createdBy == nil or tostring(message.createdBy) == "" then
+                message.createdBy = actor
+            else
+                message.createdBy = tostring(message.createdBy)
+            end
+            if message.updatedBy == nil or tostring(message.updatedBy) == "" then
+                message.updatedBy = message.createdBy or actor
+            else
+                message.updatedBy = tostring(message.updatedBy)
+            end
+            message.favorite = message.favorite == true
+            message.archived = message.archived == true
         end
+    end
+
+    while #guild.messageHistory > 250 do
+        table.remove(guild.messageHistory, 1)
+    end
+end
+
+local function ensureMessagingCampaignsState(guild)
+    if type(guild.messagingCampaigns) ~= "table" then
+        guild.messagingCampaigns = {}
+    end
+
+    guild.messagingCampaigns.meta = guild.messagingCampaigns.meta or {}
+    guild.messagingCampaigns.meta.nextCampaignId = math.max(1, math.floor(tonumber(guild.messagingCampaigns.meta.nextCampaignId) or 1))
+    guild.messagingCampaigns.meta.nextStepId = math.max(1, math.floor(tonumber(guild.messagingCampaigns.meta.nextStepId) or 1))
+    if type(guild.messagingCampaigns.campaigns) ~= "table" then
+        guild.messagingCampaigns.campaigns = {}
+    end
+    if type(guild.messagingCampaigns.steps) ~= "table" then
+        guild.messagingCampaigns.steps = {}
     end
 end
 
@@ -68,7 +159,11 @@ local function migrateGuild(guild)
     guild.scans.history = guild.scans.history or {}
     guild.prompts = guild.prompts or {}
     guild.messageQueue = guild.messageQueue or {}
+    if type(guild.messageHistory) ~= "table" then
+        guild.messageHistory = {}
+    end
     ensureMessagesState(guild)
+    ensureMessagingCampaignsState(guild)
 
     for key, player in pairs(guild.players) do
         player.key = player.key or key
@@ -144,6 +239,20 @@ function GC.Migrations:Run()
             ensureMessagesState(guild)
         end
         currentVersion = 6
+    end
+
+    if currentVersion < 7 then
+        for _, guild in pairs(root.guilds or {}) do
+            ensureMessagesState(guild)
+        end
+        currentVersion = 7
+    end
+
+    if currentVersion < 8 then
+        for _, guild in pairs(root.guilds or {}) do
+            ensureMessagingCampaignsState(guild)
+        end
+        currentVersion = 8
     end
 
     for _, guild in pairs(root.guilds or {}) do

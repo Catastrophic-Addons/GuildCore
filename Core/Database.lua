@@ -49,6 +49,15 @@ function GC.DB:GetGuild()
         scans = { history = {} },
         prompts = {},
         messageQueue = {},
+        messageHistory = {},
+        messagingCampaigns = {
+            meta = {
+                nextCampaignId = 1,
+                nextStepId = 1,
+            },
+            campaigns = {},
+            steps = {},
+        },
         messages = {
             meta = {
                 nextMessageId = 1,

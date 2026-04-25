@@ -32,6 +32,7 @@ Modules\Messages\Module.lua
 Modules\Messages\Chunker.lua
 Modules\Messages\Placeholders.lua
 Modules\Messages\Service.lua
+Modules\Messages\TemplateBridge.lua
 Modules\Operations\Service.lua
 Modules\Sync\Service.lua
 

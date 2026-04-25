@@ -94,7 +94,7 @@ Parsed note fields are stored under each player record as officer-data fields an
 ```lua
 GuildCoreDB = {
   meta = {
-    dbVersion = 6,
+    dbVersion = 7,
   },
   settings = {
     autoScanIntervalMinutes = 60,
@@ -173,6 +173,15 @@ GuildCoreDB = {
       },
       prompts = {},
       messageQueue = {},
+      messageHistory = {},
+      messagingCampaigns = {
+        meta = {
+          nextCampaignId = 1,
+          nextStepId = 1,
+        },
+        campaigns = {},
+        steps = {},
+      },
       messages = {
         meta = {
           nextMessageId = 1,
@@ -193,6 +202,10 @@ GuildCoreDB = {
             name = "General",
             createdAt = 0,
             updatedAt = 0,
+            archived = false,
+            collapsed = false,
+            color = nil,
+            icon = nil,
           },
         },
         categoryOrder = { "general" },
@@ -203,6 +216,13 @@ GuildCoreDB = {
             categoryId = "general",
             body = "Raid starts at 8 PM server.",
             notes = "Officer reminder template",
+            targetChannel = "GUILD",
+            tags = {},
+            usageCount = 0,
+            createdBy = "OfficerName",
+            updatedBy = "OfficerName",
+            favorite = false,
+            archived = false,
             createdAt = 0,
             updatedAt = 0,
             lastUsedAt = nil,
@@ -326,13 +346,19 @@ Known limitations:
 
 - The `Messages` sidebar panel stores reusable templates per guild in `GuildCoreDB.guilds[guildKey].messages`.
 - Templates support:
-  category assignment, title, notes, message body, saved order inside each category, created/updated timestamps, and optional `lastUsedAt`.
+  category assignment, title, notes, message body, saved order inside each category, target channel metadata, tags, usage counters, creator/updater names, soft favorite/archive flags, created/updated timestamps, and optional `lastUsedAt`.
 - Categories always include `General`.
+  Missing default categories are seeded without renaming existing user categories.
   Deleting a non-default category safely reassigns its messages back to `General`.
+- Message history is stored per guild in `messageHistory` and capped to the latest 250 entries.
 - Supported placeholders:
-  `@player.name`, `@guild.name`, `@realm.name`, `@target.name`, `@new.member`, and `@time.left`.
+  `@player.name`, `@guild.name`, `@realm.name`, `@target.name`, `@new.member`, `@rank.name`, `@discord.name`, `@character.name`, `@main.name`, `@team.name`, `@role.name`, `@date.today`, `@time.now`, and `@time.left`.
+  Future event placeholders such as `@event.name`, `@event.date`, and `@event.time` are recognized defensively but are not shown in the picker until backing event data exists.
 - Placeholder resolution happens at preview/send time, not when templates are saved.
-  Missing data falls back safely, such as `member`, `new member`, or a default 6:00 PM server target time.
+  Missing known values fall back safely, such as `member`, `new member`, `unknown rank`, `your guild`, or `your realm`.
+  Unknown placeholder tokens remain visible and produce a concise preview warning.
+- The editor includes a compact placeholder picker and insert button.
+  When local roster data is available, target-aware placeholders can use existing member rank and officer-data fields defensively.
 - `@new.member` is fed by `CHAT_MSG_SYSTEM` join detection and remembers the most recent guild join seen by the addon.
 - Long messages are previewed through `GC.Services.MessageChunker`, which:
   prefers paragraph breaks, then sentence boundaries, then word boundaries, and only hard-splits when needed.
@@ -342,12 +368,21 @@ Known limitations:
 - Auto Mode is optional and clearly labeled in the UI.
   When enabled, queued chunks can be sent automatically with a configurable delay and a visible stop control.
 - Queue safety rules:
-  the module rejects empty chunks, enforces a max queue size, avoids duplicate auto-send loops, and stops auto-send if the messaging module is disabled.
+  the module rejects empty chunks, enforces a max queue size, reports malformed queue entries without silently deleting them, avoids duplicate auto-send loops, and stops auto-send if the messaging module is disabled.
 - Saved templates now support direct-send buttons and drag-and-drop reorder within the selected category.
-  Up/Down buttons remain available as a fallback.
+  Up/Down buttons remain available as a fallback, and templates can be searched, duplicated, favorited, archived, unarchived, or deleted after confirmation.
+- Archived templates and categories are hidden by default and can be shown with the Messaging panel filters.
+- Category collapse, archive state, and ordering persist in SavedVariables.
+- Successful output records template usage and appends a compact read-only history entry with target, recipient, timestamp, and chunk count.
+- Templates can be manually exported/imported through copyable text.
+  Imports are handled by the `MessageTemplateBridge` service, validate first, create missing categories safely, and create local template copies without importing usage history.
+- Future campaign storage lives under `messagingCampaigns`, but no triggered campaign sending or network bridge is active.
 - Output safety:
   loading a selected chunk into chat is the safest flow, while direct sending uses the queue plus a light pacing guard to reduce spam risk.
-- Current send target support is guild chat first, with the service API shaped so officer chat, whispers, or mail can be added later without rewriting the chunker.
+- The Messaging panel includes a target channel selector for `GUILD`, `OFFICER`, `WHISPER`, `SAY`, `YELL`, `PARTY`, `RAID`, and `INSTANCE_CHAT`.
+  Whisper output requires a recipient before queueing, sending, or loading a chunk into chat.
+- Riskier channels and outputs longer than three chunks ask for confirmation before queueing or starting Auto Mode.
+  Manual Mode remains the default.
 
 ## Debug Output
 
