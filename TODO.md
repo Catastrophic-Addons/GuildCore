@@ -22,6 +22,12 @@
 - [x] Guild/Community UI access tab with load-on-demand safety
 - [x] Main-frame and popup layering helpers for Guild Core UI
 - [x] Message placeholders, Auto Mode queue automation, direct-send row actions, and drag reorder for Messages
+- [x] Messaging service split into storage, history, categories, templates, queue, automation, and template bridge helpers
+- [x] Font theme system with Settings-driven font switching
+- [x] Purge tab with review-first removal queue, safe-tag checks, permission/rank gating, and macro generation
+- [x] Operations helpers for MOTD, promote, demote, and remove macro flows
+- [x] Invite module with WHO-based candidate scanning, filters, history, recent invite/decline tracking, hotkeys, dry run, and explicit Invite Next flow
+- [x] Batched welcome messages for new joins with roster-comparison fallback and duplicate protection
 
 ## Messaging System Roadmap
 
@@ -78,8 +84,8 @@
 - [x] Changed `Modules/Messages/Service.lua` for repeat-safe schema validation, message history helpers, and channel metadata helpers only
 - [x] Changed `Core/Migrations.lua`, `Core/Database.lua`, and `Data/Defaults.lua` for non-destructive dbVersion 7 defaults/migration support
 - [x] Changed `README.md` briefly because Messaging SavedVariables internals are already documented there
-- [ ] Follow-up risk: Phase 2 must wire channel metadata into UI/send paths carefully; Phase 1 intentionally leaves Queue Preview, Direct Send, Send Next, and Load Chunk behavior unchanged
-- [ ] Follow-up risk: future history writes should only happen after a successful send or officer-confirmed action, not during preview or queue-only flows
+- [x] Follow-up complete: Phase 2 wired channel metadata into Queue Preview, Direct Send, Send Next, and Load Chunk behavior
+- [x] Follow-up complete: history and usage writes now happen from send/output paths, not preview-only or queue-only flows
 
 ### Phase 2 - Messaging Safety and Target UI
 
@@ -201,6 +207,10 @@
 ## Next Priority
 
 - [x] Start Messaging Phase 1 with schema-safe template/category field expansion and service-level channel metadata
+- [x] Add Invite tab foundation with safe explicit user-triggered invite flow
+- [x] Add Purge tab foundation with review-first macro workflow
+- [x] Add batched welcome messages for new guild joins
+- [x] Add configurable UI font themes
 - [ ] Add a dedicated guild bank history view with tab and transaction-type filters
 - [ ] Add bank-capture summaries or status text in the UI after a successful guild bank import
 - [ ] Add optional export helpers for guild bank history
@@ -209,6 +219,10 @@
 - [ ] Improve visibility for `untracked` transitions caused by rank changes
 - [ ] Add grouped roster views by main character
 - [ ] Expand export helpers beyond the current simple Dashboard copy-paste flow
+- [ ] Finish the multi-select invite workflow once a safe user-action model is settled
+- [ ] Add richer invite session reporting around pending/no-response outcomes
+- [ ] Add welcome-message preview/testing controls in Settings or the Messages panel
+- [ ] Design sync payloads for relationship and officer-note intelligence before enabling client-to-client reconciliation
 
 ## Later
 
@@ -216,3 +230,4 @@
 - [ ] Add audit tools for officer-note formatting consistency
 - [ ] Add richer inactivity / retention dashboards
 - [ ] Add messaging templates that pull tracked roster intelligence into placeholders or targeted output flows
+- [ ] Add campaign workflow execution only after onboarding state and external bridge safety are reviewed

@@ -399,6 +399,7 @@ Known limitations:
 ## Recruitment Invites
 
 - The Invite tab scans for recruitment candidates through WoW's `/who` data path and stores candidates per guild.
+- Invite compliance documentation for guild/officer review lives in `Documents/Invite_Compliance_Review.md`.
 - Filters include guilded, recently invited, recently declined, level bands, class filters, zone filters, realm handling, and online requirements.
 - `Dry Run` defaults to `false`.
   When enabled manually, the invite path records/logs intent without sending live guild invites.
