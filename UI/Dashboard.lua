@@ -20,12 +20,12 @@ local function makeCard(parent, label)
     stripe:SetPoint("TOPLEFT"); stripe:SetPoint("TOPRIGHT"); stripe:SetHeight(2)
     local a = Th.c.accent
     stripe:SetColorTexture(a[1], a[2], a[3], 0.65)
-    local lblFs = Th.Fs(f, "tiny", label or "", "textDimmed")
+    local lblFs = Th.Fs(f, "data", label or "", "textDimmed")
     lblFs:SetPoint("TOPLEFT", 8, -12)
     lblFs:SetPoint("TOPRIGHT", -8, -12)
     lblFs:SetJustifyH("CENTER")
     lblFs:SetWordWrap(false)
-    local valFs = Th.Fs(f, "header", "—", "textPrimary")
+    local valFs = Th.Fs(f, "dataLarge", "—", "textPrimary")
     valFs:SetPoint("CENTER", 0, -8)
     valFs:SetJustifyH("CENTER")
     return f, function(v) valFs:SetText(tostring(v or "—")) end,
@@ -71,10 +71,27 @@ local function buildAttentionRow(row, item)
         local actionFs = Th.Fs(row, "small", "", "textDimmed")
         actionFs:SetPoint("LEFT", 420, 0)
         actionFs:SetPoint("RIGHT", -10, 0)
-        row._nameFs = nameFs
-        row._issueFs = issueFs
+        local navHint = Th.Fs(row, "tiny", "→ click to navigate", "textDimmed")
+        navHint:SetPoint("RIGHT", -10, 0)
+        navHint:SetAlpha(0)
+        row._nameFs   = nameFs
+        row._issueFs  = issueFs
         row._actionFs = actionFs
+        row._navHint  = navHint
         row._built = true
+
+        local prevEnter = row:GetScript("OnEnter")
+        local prevLeave = row:GetScript("OnLeave")
+        row:SetScript("OnEnter", function(self)
+            if prevEnter then prevEnter(self) end
+            if self._navHint then self._navHint:SetAlpha(0.7) end
+            if self._actionFs then self._actionFs:SetAlpha(0) end
+        end)
+        row:SetScript("OnLeave", function(self)
+            if prevLeave then prevLeave(self) end
+            if self._navHint then self._navHint:SetAlpha(0) end
+            if self._actionFs then self._actionFs:SetAlpha(1) end
+        end)
     end
 
     local actionColor = Th.c[item.colorKey or "textAccent"] or Th.c.textAccent
@@ -109,7 +126,7 @@ function DB:Create(parent)
     guildStripe:SetColorTexture(a[1], a[2], a[3], 0.9)
     local guildNameFs = Th.Fs(guildCard, "subheader", "—", "textAccent")
     guildNameFs:SetPoint("LEFT", 14, 6)
-    local guildSubFs  = Th.Fs(guildCard, "small", "No guild data", "textDimmed")
+    local guildSubFs  = Th.Fs(guildCard, "data", "No guild data", "textDimmed")
     guildSubFs:SetPoint("LEFT", 14, -12)
     self.guildNameFs  = guildNameFs
     self.guildSubFs   = guildSubFs
@@ -162,7 +179,7 @@ function DB:Create(parent)
 
     -- ── Last scan line ───────────────────────────
     local scanLineTop = summaryTop - summaryH - P/2
-    local scanFs = Th.Fs(frame, "small", "Last scan: —", "textDimmed")
+    local scanFs = Th.Fs(frame, "data", "Last scan: —", "textDimmed")
     scanFs:SetPoint("TOPLEFT", frame, "TOPLEFT", P, scanLineTop)
     self.scanFs = scanFs
 
@@ -179,7 +196,7 @@ function DB:Create(parent)
         {key = "initiatesNeedingReview", label = "Initiates Needing Review"},
         {key = "missingDiscordVerification", label = "Missing Discord Verification"},
         {key = "unlinkedCharacters", label = "Unlinked / Unknown"},
-        {key = "inactiveMembers", label = "Inactive 7+ Days"},
+        {key = "inactiveMembers", label = "Ready for Purge"},
     }
     self.insightTiles = {}
     for _, td in ipairs(insightDefs) do
@@ -216,7 +233,24 @@ function DB:Create(parent)
     local attentionListHost = CreateFrame("Frame", nil, attentionFrame)
     attentionListHost:SetPoint("TOPLEFT", attentionFrame, "TOPLEFT", 0, -Th.colBarH)
     attentionListHost:SetPoint("BOTTOMRIGHT", attentionFrame, "BOTTOMRIGHT", 0, 0)
-    self.attentionList = GC.UI.List.Create(attentionListHost, 24, buildAttentionRow, nil)
+    self.attentionList = GC.UI.List.Create(attentionListHost, 24, buildAttentionRow, function(item)
+        if not item then return end
+        GC.UI.MainFrame:SetActivePanel("roster")
+        local function focusRosterTarget()
+            local roster = GC.UI.RosterPanel
+            if roster and roster.FocusCharacter then
+                local ok, message = roster:FocusCharacter(item.key or item.character)
+                if not ok and GC.Debug then
+                    GC:Debug(message or "Needs Attention target was not found in the roster.")
+                end
+            end
+        end
+        if C_Timer and C_Timer.After then
+            C_Timer.After(0, focusRosterTarget)
+        else
+            focusRosterTarget()
+        end
+    end)
     self.attentionList:SetEmptyText("No urgent guild issues found.")
 
     local exportOverlay = CreateFrame("Frame", nil, frame)
@@ -287,12 +321,12 @@ function DB:Refresh()
         {key = "initiatesNeedingReview", label = "Initiates Needing Review"},
         {key = "missingDiscordVerification", label = "Missing Discord Verification"},
         {key = "unlinkedCharacters", label = "Unlinked / Unknown"},
-        {key = "inactiveMembers", label = "Inactive 7+ Days"},
+        {key = "inactiveMembers", label = "Ready for Purge"},
     }, self.insightTiles, -(P + 52 + P) - 72 - P - 72 - P - 22, 68, P)
 
     local stats = GS():GetStats()
     local insights = GS():GetGuildInsights()
-    local attentionRows = GS():GetNeedsAttention(10)
+    local attentionRows = GS():GetNeedsAttention()
 
     -- Guild header
     local guildName = GetGuildInfo and GetGuildInfo("player") or nil

@@ -1,6 +1,8 @@
 # Guild Core
 
-Guild Core is a Retail World of Warcraft addon for guild roster intelligence, officer workflows, and member history tracking.
+Guild Core is a Retail World of Warcraft addon for guild roster intelligence, recruitment, officer workflows, communication, and member history tracking.
+
+Current addon version: `1.5.9`
 
 ## Current Module Structure
 
@@ -20,12 +22,18 @@ Guild Core is a Retail World of Warcraft addon for guild roster intelligence, of
   Point balance and transaction logging.
 - `Modules/Messages/`
   Native message-library module, reusable chunking service, saved categories/templates, and safe guild-message output helpers.
+- `Modules/Invite/`
+  Recruitment scanning, invite candidate filtering, direct user-triggered guild invites, invite history, recent-decline tracking, and invite UI state.
+- `Modules/WelcomeBatch/`
+  Batched post-join guild welcome messages using system-message detection plus guild roster comparison.
 - `Modules/Operations/`
   Officer macro helpers and MOTD support.
+- `Modules/Purge/`
+  Review-first guild removal queue, inactivity candidate scan, safe-tag protection, `/gremove` macro generation, and post-execution verification.
 - `Modules/Sync/`
   Stub for future outbound sync work.
 - `UI/`
-  Main frame, roster/dashboard/log/settings panels, player detail controls, compact first-seen prompt card, dashboard officer-insight views, minimap access button, Community/Guild UI access tab, and shared layering helpers.
+  Main frame, roster/dashboard/purge/log/settings panels, player detail controls, compact first-seen prompt card, dashboard officer-insight views, minimap access button, Community/Guild UI access tab, and shared layering helpers.
 
 ## UI Access Points
 
@@ -37,9 +45,10 @@ Guild Core is a Retail World of Warcraft addon for guild roster intelligence, of
   The button angle around the minimap is stored in `GuildCoreDB.ui.minimapButtonAngle`.
   Existing saved variables are preserved because defaults are merged only for missing keys.
 - Community/Guild tab:
-  When Blizzard's Guild/Community interface is available, GuildCore adds a right-side icon button below the existing Blizzard tabs when possible.
+  When Blizzard's Guild/Community interface is available, GuildCore adds a transparent right-side icon button near the bottom-right edge of the Guild/Communities frame.
   Clicking it toggles the Guild Core main window.
   The integration waits for `Blizzard_Communities` / related UI to load and retries defensively, so the tab may appear only after the J-key interface has been opened or Blizzard finishes loading that UI.
+  The hover state uses a subtle golden glow, while the icon itself remains visually close to Blizzard's side-tab stack.
 - Icon asset:
   Both access points use `Interface/AddOns/GuildCore/Assets/icons/GC_Gold.tga`.
 
@@ -94,19 +103,29 @@ Parsed note fields are stored under each player record as officer-data fields an
 ```lua
 GuildCoreDB = {
   meta = {
-    dbVersion = 7,
+    dbVersion = 18,
   },
   settings = {
     autoScanIntervalMinutes = 60,
     enableRosterModule = true,
     enableGuildBankModule = true,
     enableMessagingModule = true,
+    enableInviteModule = true,
+    includeConnectedRealms = true,
+    allowHomeRealmFallback = true,
+    neverScanAllRealms = true,
     enablePointsModule = true,
     enableSyncModule = false,
     enableClassificationPrompts = true,
     officerRankThreshold = 4,
     debugMode = false,
     themePreset = "guildcore",
+    fontTheme = "wowDefault",
+    inviteHotkey = "CTRL-SHIFT-I",
+    inviteScanHotkey = "CTRL-SHIFT-S",
+    enableWelcomeBatch = true,
+    welcomeBatchWindowSeconds = 180,
+    welcomeMessageTemplate = "Welcome to the guild, {names}! Glad to have you aboard!",
   },
   ui = {
     lastPanel = "dashboard",
@@ -172,6 +191,19 @@ GuildCoreDB = {
         history = {},
       },
       prompts = {},
+      purge = {
+        queue = {},
+        candidates = {},
+        protected = {},
+        log = {},
+        meta = {
+          daysOffline = 30,
+          safeTags = { "PROTECTED", "LEAVE", "OFFICER ALT", "DO NOT KICK" },
+          includeRanks = { "Initiate", "Member" },
+          includeAllRanks = true,
+          exemptLinkedCharacters = true,
+        },
+      },
       messageQueue = {},
       messageHistory = {},
       messagingCampaigns = {
@@ -231,6 +263,28 @@ GuildCoreDB = {
         messageOrderByCategory = {
           general = { "msg-1" },
         },
+      },
+      invite = {
+        settings = {
+          enabled = false,
+          dryRun = false,
+          guildlessOnly = true,
+          requireOnline = true,
+          inviteDelaySeconds = 3,
+          inviteResponseTimeoutSeconds = 20,
+          maxPerSession = 25,
+          showGuildedCandidates = false,
+          showRecentlyInvitedCandidates = false,
+          showRecentlyDeclinedCandidates = false,
+        },
+        recentInvites = {},
+        recentDeclines = {},
+        cooldowns = {},
+        history = {},
+      },
+      welcomeBatch = {
+        recentWelcomed = {},
+        lastSentAt = nil,
       },
       sync = {
         outboundQueue = {},
@@ -342,6 +396,41 @@ Known limitations:
 - Roster panel:
   `Refresh`
 
+## Recruitment Invites
+
+- The Invite tab scans for recruitment candidates through WoW's `/who` data path and stores candidates per guild.
+- Filters include guilded, recently invited, recently declined, level bands, class filters, zone filters, realm handling, and online requirements.
+- `Dry Run` defaults to `false`.
+  When enabled manually, the invite path records/logs intent without sending live guild invites.
+- `Invite Next` is the primary live invite action.
+  It sends one selected eligible invite directly from the user's click or configured hotkey.
+- `Invite Selected` is intentionally disabled/muted in the UI and labeled as in progress to avoid implying unattended bulk invites are supported.
+- `Select All`, `Clear Selection`, and `Refresh Status` manage candidate selection and update local invite/decline state.
+- Invite hotkeys are configurable in Settings:
+  `Invite Next hotkey` defaults to `CTRL-SHIFT-I`, and `Invite Scan hotkey` defaults to `CTRL-SHIFT-S`.
+  Click the hotkey field, press the desired key combination, or use `Escape`, `Backspace`, or `Delete` to clear it.
+- WoW's protected-action model still applies:
+  unattended automated guild invites are not reliable or appropriate, so GuildCore favors explicit user-triggered invite actions.
+
+## Batched Welcome Messages
+
+- `Modules/WelcomeBatch/Service.lua` watches for new guild joins using two signals:
+  localized `CHAT_MSG_SYSTEM` join text when available, and debounced `GUILD_ROSTER_UPDATE` roster comparison as the reliable fallback.
+- Existing roster members become the baseline on login or `/reload`, which prevents welcoming the whole guild after startup.
+- New joins are collected into a queue and sent as one guild chat message after the configured batch window.
+  The default window is `180` seconds and the Settings UI enforces a minimum of `15` seconds.
+- The default template is:
+  `Welcome to the guild, {names}! Glad to have you aboard!`
+- `{names}` is replaced with a natural list:
+  `Allisock`, `Allisock and Steve`, or `Allisock, Steve, and Danktotemz`.
+  If `{names}` is missing from the template, GuildCore appends the names safely.
+- Duplicate protection uses normalized character keys plus `guild.welcomeBatch.recentWelcomed`, so reloads or repeated roster events do not resend the same welcome.
+- Sending is skipped when:
+  the feature is disabled, the Messaging module is disabled, the queue is empty, the character is not in a guild, guild chat permission is unavailable, or combat lockdown is active.
+  Combat skips are retried after a short delay.
+- Welcome messages are capped to a guild-chat-safe length; very large batches collapse to an `and others` form rather than producing an oversized chat line.
+- Debug mode logs detection, queueing, timer start, sending, and skipped-send reasons.
+
 ## Messages Module
 
 - The `Messages` sidebar panel stores reusable templates per guild in `GuildCoreDB.guilds[guildKey].messages`.
@@ -384,11 +473,27 @@ Known limitations:
 - Riskier channels and outputs longer than three chunks ask for confirmation before queueing or starting Auto Mode.
   Manual Mode remains the default.
 
+## Purge Safety
+
+- GuildCore never calls `GuildRemove()` or `GuildUninvite()` directly for purge actions.
+  Guild removal is prepared as `/gremove PlayerName` lines inside the account-wide `GuildCore_Action` macro because Blizzard requires the final guild removal command to be user executed.
+- Manual purge from the roster/player UI only adds an entry to the purge queue.
+  The officer must review the queue, build the macro, then click or place the `GuildCore_Action` macro.
+- Rule scans start conservatively with `Initiate` and `Member` ranks, an offline-days threshold, and safe tag checks against public notes, officer notes, and local custom notes.
+  Safe tags are case-insensitive and include `PROTECTED`, `LEAVE`, `OFFICER ALT`, and `DO NOT KICK` by default.
+- Purge actions are permission-gated with `CanGuildRemove()` and rank comparison.
+  Guild Masters and equal or higher-ranked members are never queued.
+- Macro batches respect WoW's 255-character macro limit.
+  If the queue is larger than one macro can hold, rebuild the macro after the first batch is clicked and verified.
+- GuildCore does not mark a purge as complete when the macro is built or clicked.
+  It waits for a matching system message or a roster refresh showing that the queued member is no longer active, then logs the verified removal locally.
+
 ## Debug Output
 
 - Debug chat output only appears when `Debug mode` is enabled in Settings.
 - Each completed scan logs a compact summary in debug mode:
   tracked members, online tracked members, excluded members, change count, and pending prompt count.
+- Invite and welcome systems add debug lines for scan/invite status, join detection, welcome queueing, batch timers, send attempts, and skipped-send reasons.
 
 ## Known Limitations
 
@@ -402,6 +507,10 @@ Known limitations:
   The Messages panel therefore focuses on previewing chunks, loading them into chat input safely, and queueing direct sends carefully.
 - Blizzard chat throttling and server-side anti-spam protections still apply.
   Auto Mode uses a paced loop, but addons still cannot guarantee delivery timing if Blizzard throttles or blocks outgoing chat.
+- Guild invites require an explicit user-triggered action.
+  GuildCore supports `Invite Next` and an invite hotkey, but does not provide unattended bulk guild invites.
+- Batched welcome messages use the best join signals available to addons.
+  Roster comparison is the fallback when localized system text is missing or inconsistent.
 
 ## Next Roadmap Items
 
@@ -410,3 +519,4 @@ Known limitations:
 - Optional exports for tracked roster and relationship data.
 - Sync payload design for relationship and officer-note intelligence.
 - Additional roster intelligence for inactivity review and officer dashboards.
+- Finish the multi-select invite workflow once a safe user-action model is settled.

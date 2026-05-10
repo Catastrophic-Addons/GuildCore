@@ -9,6 +9,25 @@ local function ensurePromptState(record)
     return record.promptState
 end
 
+local function forEachSnapshotMember(snapshot, callback)
+    for _, member in pairs((snapshot and snapshot.members) or {}) do
+        callback(member)
+    end
+    for _, member in pairs((snapshot and snapshot.excluded) or {}) do
+        callback(member)
+    end
+end
+
+local function buildSnapshotMemberKeys(snapshot)
+    local keys = {}
+    forEachSnapshotMember(snapshot, function(member)
+        if member and member.key then
+            keys[member.key] = true
+        end
+    end)
+    return keys
+end
+
 -- Build or return the existing player record for a snapshot member.
 local function ensurePlayerRecord(member)
     local players = GC.DB:GetPlayers()
@@ -29,7 +48,7 @@ local function ensurePlayerRecord(member)
             joinedAtSource   = member.officerData and member.officerData.joinDate and "officerNote" or nil,
             promotedAt       = nil,
             lastRosterSeenAt = member.capturedAt,    -- any scan
-            lastSeenAt       = member.isOnline and member.capturedAt or nil, -- online only
+            lastSeenAt       = member.isOnline and member.capturedAt or (member.offlineHours and member.offlineHours > 0 and (member.capturedAt - (member.offlineHours * 3600)) or nil),
             status  = "active",
             classification = "unknown",
             main    = nil,
@@ -43,6 +62,7 @@ local function ensurePlayerRecord(member)
                 discordName = member.officerData and member.officerData.discordName or nil,
                 noteLastParsedAt = member.capturedAt,
             },
+            isTrackedRank = member.isTrackedRank and true or false,
             lastScanReason = nil,
             syncMeta = {
                 joinedAt   = member.capturedAt,
@@ -113,10 +133,15 @@ local function updateMemberRecord(record, member, reason)
     record.publicNote       = member.publicNote
     record.officerNote      = member.officerNote
     record.isOnline         = member.isOnline
+    record.offlineHours     = member.offlineHours
+    record.offlineDays      = member.offlineDays
     record.lastRosterSeenAt = member.capturedAt
     record.lastScanReason   = reason
+    record.isTrackedRank    = member.isTrackedRank and true or false
     if member.isOnline then
         record.lastSeenAt = member.capturedAt
+    elseif member.offlineHours and member.offlineHours > 0 then
+        record.lastSeenAt = member.capturedAt - (member.offlineHours * 3600)
     end
     record.status = "active"
     applyParsedOfficerData(record, member)
@@ -128,6 +153,7 @@ local function countPendingPrompts(players)
         local promptState = player.promptState or {}
         if player.status == "active"
             and player.classification == "unknown"
+            and player.isTrackedRank ~= false
             and not promptState.dismissedAt
             and not promptState.bootstrapSuppressed then
             pending = pending + 1
@@ -147,7 +173,7 @@ function GC.Modules.RosterHistory:Bootstrap(snapshot)
     local players = GC.DB:GetPlayers()
     if not players then return end
 
-    for _, member in pairs(snapshot.members) do
+    forEachSnapshotMember(snapshot, function(member)
         local record = ensurePlayerRecord(member)
         if record then
             updateMemberRecord(record, member, "bootstrap")
@@ -156,7 +182,7 @@ function GC.Modules.RosterHistory:Bootstrap(snapshot)
                 promptState.bootstrapSuppressed = true
             end
         end
-    end
+    end)
 
     local summary = {
         timestamp = snapshot.takenAt,
@@ -178,13 +204,16 @@ function GC.Modules.RosterHistory:ApplyChanges(snapshot, changes, reason)
     local players = GC.DB:GetPlayers()
     if not players then return end
 
-    -- Update every member present in the snapshot.
-    for _, member in pairs(snapshot.members) do
+    local currentKeys = buildSnapshotMemberKeys(snapshot)
+
+    -- Update every guild member present in the snapshot, including officers
+    -- and other ranks outside the tracked intelligence scope.
+    forEachSnapshotMember(snapshot, function(member)
         local record = ensurePlayerRecord(member)
         if record then
             updateMemberRecord(record, member, reason)
         end
-    end
+    end)
 
     -- Process structural changes (joins, leaves, promotions, note edits).
     for _, change in ipairs(changes) do
@@ -210,13 +239,21 @@ function GC.Modules.RosterHistory:ApplyChanges(snapshot, changes, reason)
             if record and member then
                 record.rankName = member.rankName
                 record.rankIndex = member.rankIndex
-                record.status = "untracked"
+                record.status = "active"
+                record.isTrackedRank = false
                 record.lastRosterSeenAt = snapshot.takenAt
                 record.lastScanReason = reason
             end
         end
 
         appendLog(change.type, change.playerKey, change.oldValue, change.newValue, reason)
+    end
+
+    for key, record in pairs(players) do
+        if record.status == "active" and not currentKeys[key] then
+            record.status = "left"
+            record.lastScanReason = reason
+        end
     end
 
     local summary = {

@@ -23,7 +23,7 @@ function GC.Modules.RosterScan:Capture()
     local totalMembers = GetNumGuildMembers()
     local totalRanks = GetNumGuildRanks and GetNumGuildRanks() or nil
     for index = 1, totalMembers do
-        local fullName, rankName, rankIndex, level, classDisplayName, zone, publicNote, officerNote, isOnline, status, classFileName, achievementPoints, achievementRank, isMobile, canSoR, reputation = GC.API.GetGuildRosterInfo(index)
+        local fullName, rankName, rankIndex, level, classDisplayName, zone, publicNote, officerNote, isOnline, status, classFileName, achievementPoints, achievementRank, isMobile, canSoR, reputation, yearsOffline, monthsOffline, daysOffline, hoursOffline = GC.API.GetGuildRosterInfo(index)
 
         if fullName then
             local name, realm = GC.Utils.SplitGuildName(fullName)
@@ -31,6 +31,18 @@ function GC.Modules.RosterScan:Capture()
             local parsedOfficerNote = GC.Utils.ParseOfficerNote(officerNote)
             local trackedByName = GC.Utils.IsTrackedRank(rankName)
             local trackedByIndex = GC.Utils.IsTrackedRankIndex(rankIndex, totalRanks)
+            yearsOffline = tonumber(yearsOffline) or 0
+            monthsOffline = tonumber(monthsOffline) or 0
+            daysOffline = tonumber(daysOffline) or 0
+            hoursOffline = tonumber(hoursOffline) or 0
+            if not isOnline and yearsOffline == 0 and monthsOffline == 0 and daysOffline == 0 and hoursOffline == 0 and GC.API.GetGuildRosterLastOnline then
+                local y, m, d, h = GC.API.GetGuildRosterLastOnline(index)
+                yearsOffline = tonumber(y) or yearsOffline
+                monthsOffline = tonumber(m) or monthsOffline
+                daysOffline = tonumber(d) or daysOffline
+                hoursOffline = tonumber(h) or hoursOffline
+            end
+            local offlineHours = isOnline and 0 or ((yearsOffline * 365 * 24) + (monthsOffline * 30 * 24) + (daysOffline * 24) + hoursOffline)
             local member = {
                 key = key,
                 name = name,
@@ -47,6 +59,12 @@ function GC.Modules.RosterScan:Capture()
                 isOnline = isOnline and true or false,
                 capturedAt = snapshot.takenAt,
                 isTrackedRank = trackedByName or trackedByIndex,
+                yearsOffline = yearsOffline,
+                monthsOffline = monthsOffline,
+                daysOffline = daysOffline,
+                hoursOffline = hoursOffline,
+                offlineHours = offlineHours,
+                offlineDays = math.floor(offlineHours / 24),
             }
 
             snapshot.summary.totalMembers = snapshot.summary.totalMembers + 1

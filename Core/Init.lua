@@ -15,6 +15,10 @@ GC.State = GC.State or {
     initialized     = false,
     rosterTicker    = nil,
     pendingScanReason = nil,   -- set when GuildRoster() is requested proactively
+    actionMacroOwner = nil,
+    actionMacroExecuted = false,
+    actionMacroOwnerExecuted = nil,
+    actionMacroExecutedAt = nil,
 }
 
 function GC:Print(...)
@@ -26,4 +30,31 @@ function GC:Debug(...)
     if settings and settings.debugMode then
         self:Print(...)
     end
+end
+
+local INVITE_WARNING_LEVELS = {
+    warn = true,
+    warning = true,
+    error = true,
+}
+
+function GC:IsInviteDebugEnabled()
+    local service = self.Services and self.Services.Invite
+    local settings = service and service.GetSettings and service:GetSettings() or nil
+    return settings and settings.debugEnabled == true
+end
+
+function GC:InviteDebug(level, ...)
+    if not INVITE_WARNING_LEVELS[level] then
+        if select("#", ...) == 0 then
+            return self:InviteDebug("debug", level)
+        end
+        if not self:IsInviteDebugEnabled() then
+            return
+        end
+        self:Print(...)
+        return
+    end
+
+    self:Print(...)
 end

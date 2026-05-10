@@ -70,6 +70,9 @@ GC.Events:SetScript("OnEvent", function(_, event, ...)
         if GC.Services.GuildBank then
             GC.Services.GuildBank:EnsureHooks()
         end
+        if GC.Services.WelcomeBatch then
+            GC.Services.WelcomeBatch:Initialize()
+        end
         if GC.UI and GC.UI.MinimapButton then
             GC.UI.MinimapButton:Initialize()
         end
@@ -80,6 +83,9 @@ GC.Events:SetScript("OnEvent", function(_, event, ...)
         GC:Print("Loaded v" .. tostring(GC.Version))
 
     elseif event == "PLAYER_LOGIN" then
+        if GC.Services.WelcomeBatch then
+            GC.Services.WelcomeBatch:Initialize()
+        end
         if GC.UI and GC.UI.MinimapButton then
             GC.UI.MinimapButton:Initialize()
         end
@@ -94,6 +100,9 @@ GC.Events:SetScript("OnEvent", function(_, event, ...)
 
     elseif event == "PLAYER_GUILD_UPDATE" then
         if IsInGuild() then
+            if GC.Services.WelcomeBatch and GC.Services.WelcomeBatch.OnGuildChanged then
+                GC.Services.WelcomeBatch:OnGuildChanged()
+            end
             requestLoginScan("guild-update")
             startRosterTicker()
         end
@@ -130,6 +139,15 @@ GC.Events:SetScript("OnEvent", function(_, event, ...)
                 rosterUpdatePending = false
                 if IsInGuild() and GC.Services.Roster then
                     GC.Services.Roster:RunScan(reason)
+                    if GC.Services.OperationsMacro and GC.Services.OperationsMacro.ValidateRosterUpdate then
+                        GC.Services.OperationsMacro:ValidateRosterUpdate()
+                    end
+                    if GC.Services.Purge and GC.Services.Purge.OnRosterUpdated then
+                        GC.Services.Purge:OnRosterUpdated()
+                    end
+                    if GC.Services.WelcomeBatch and GC.Services.WelcomeBatch.OnRosterUpdated then
+                        GC.Services.WelcomeBatch:OnRosterUpdated(reason)
+                    end
                 end
             end)
         else
@@ -138,8 +156,49 @@ GC.Events:SetScript("OnEvent", function(_, event, ...)
         end
     elseif event == "CHAT_MSG_SYSTEM" then
         local message = ...
+        if GC.Services.OperationsMacro and GC.Services.OperationsMacro.CaptureSystemMessage then
+            GC.Services.OperationsMacro:CaptureSystemMessage(message)
+        end
         if GC.Services.Messages and GC.Services.Messages.CaptureSystemMessage then
             GC.Services.Messages:CaptureSystemMessage(message)
+        end
+        if GC.Services.Purge and GC.Services.Purge.CaptureSystemMessage then
+            GC.Services.Purge:CaptureSystemMessage(message)
+        end
+        if GC.Services.InviteProbe and GC.Services.InviteProbe.CaptureSystemMessage then
+            GC.Services.InviteProbe:CaptureSystemMessage(message)
+        end
+        if GC.Services.InviteHistory and GC.Services.InviteHistory.CaptureSystemMessage then
+            GC.Services.InviteHistory:CaptureSystemMessage(message)
+        end
+        if GC.Services.WelcomeBatch and GC.Services.WelcomeBatch.CaptureSystemMessage then
+            GC.Services.WelcomeBatch:CaptureSystemMessage(message)
+        end
+    elseif event == "UI_ERROR_MESSAGE" then
+        local errorType, message = ...
+        if GC.Services.InviteProbe and GC.Services.InviteProbe.CaptureUIError then
+            GC.Services.InviteProbe:CaptureUIError(errorType, message)
+        end
+        if GC.Services.InviteScanner and GC.Services.InviteScanner.HandleUIError then
+            GC.Services.InviteScanner:HandleUIError(errorType, message)
+        end
+        if GC.Services.InviteHistory and GC.Services.InviteHistory.CaptureUIError then
+            GC.Services.InviteHistory:CaptureUIError(errorType, message)
+        end
+    elseif event == "UI_INFO_MESSAGE" then
+        local infoType, message = ...
+        if GC.Services.InviteHistory and GC.Services.InviteHistory.CaptureSystemMessage then
+            GC.Services.InviteHistory:CaptureSystemMessage(message)
+        end
+        if GC.Services.InviteProbe and GC.Services.InviteProbe.CaptureSystemMessage then
+            GC.Services.InviteProbe:CaptureSystemMessage(message)
+        end
+    elseif event == "WHO_LIST_UPDATE" then
+        if GC.Services.InviteScanner and GC.Services.InviteScanner.HandleWhoListUpdate then
+            GC.Services.InviteScanner:HandleWhoListUpdate()
+        end
+        if GC.Services.InviteProbe and GC.Services.InviteProbe.OnWhoListUpdate then
+            GC.Services.InviteProbe:OnWhoListUpdate()
         end
     end
 end)
@@ -152,3 +211,6 @@ GC.Events:RegisterEvent("GUILDBANKFRAME_OPENED")
 GC.Events:RegisterEvent("GUILDBANKFRAME_CLOSED")
 GC.Events:RegisterEvent("GUILDBANKLOG_UPDATE")
 GC.Events:RegisterEvent("CHAT_MSG_SYSTEM")
+GC.Events:RegisterEvent("UI_ERROR_MESSAGE")
+GC.Events:RegisterEvent("UI_INFO_MESSAGE")
+GC.Events:RegisterEvent("WHO_LIST_UPDATE")

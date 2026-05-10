@@ -59,6 +59,7 @@ function List.Create(parent, rowH, buildRow, onSelect, onContext)
     -- Row pool
     local rows = {}
     local selectedKey = nil
+    local currentData = {}
 
     -- Refresh from a pool — reuse or create row frames
     local function getRow(i)
@@ -103,11 +104,29 @@ function List.Create(parent, rowH, buildRow, onSelect, onContext)
         end
     end
 
+    local function applySelectionStyles()
+        local Th2 = T()
+        for _, row in ipairs(rows) do
+            if row._itemKey and selectedKey and row._itemKey == selectedKey then
+                local sc = Th2.c.rowSelected
+                row._sel:SetColorTexture(sc[1], sc[2], sc[3], sc[4])
+                row._sel:SetAlpha(1)
+                local a = Th2.c.accent
+                row._bar:SetColorTexture(a[1], a[2], a[3], 1)
+                row._bar:SetAlpha(1)
+            else
+                if row._sel then row._sel:SetAlpha(0) end
+                if row._bar then row._bar:SetAlpha(0) end
+            end
+        end
+    end
+
     -- Public: Refresh list with new data array
     function obj:Refresh(data)
         local Th2   = T()
         local count = data and #data or 0
         local totalH = count * rowH
+        currentData = data or {}
 
         content:SetHeight(math.max(totalH, 1))
 
@@ -126,6 +145,7 @@ function List.Create(parent, rowH, buildRow, onSelect, onContext)
         for i = 1, count do
             local row  = getRow(i)
             local item = data[i]
+            row._itemKey = item and item.key or nil
 
             -- Alternating row color
             local c = (i % 2 == 0) and Th2.c.rowEven or Th2.c.rowOdd
@@ -175,6 +195,7 @@ function List.Create(parent, rowH, buildRow, onSelect, onContext)
 
         -- Hide excess rows
         for i = count + 1, #rows do
+            rows[i]._itemKey = nil
             rows[i]:Hide()
         end
 
@@ -185,8 +206,39 @@ function List.Create(parent, rowH, buildRow, onSelect, onContext)
     end
 
     -- Public: programmatically mark a key as selected
-    function obj:SetSelected(key)
+    function obj:SetSelected(key, scrollToSelection)
         selectedKey = key
+        applySelectionStyles()
+        if scrollToSelection then
+            self:ScrollToKey(key)
+        end
+    end
+
+    function obj:GetSelected()
+        return selectedKey
+    end
+
+    function obj:ScrollToIndex(index)
+        index = tonumber(index)
+        if not index or index < 1 then
+            return false
+        end
+        local _, max_ = scrollBar:GetMinMaxValues()
+        local target = math.max(0, math.min(max_ or 0, (index - 1) * rowH))
+        scrollBar:SetValue(target)
+        return true
+    end
+
+    function obj:ScrollToKey(key)
+        if not key then
+            return false
+        end
+        for index, item in ipairs(currentData or {}) do
+            if item and item.key == key then
+                return self:ScrollToIndex(index)
+            end
+        end
+        return false
     end
 
     -- Public: set placeholder text shown when the list is empty

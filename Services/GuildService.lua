@@ -7,7 +7,6 @@ local GC = ns.GuildCore
 GC.Services              = GC.Services or {}
 GC.Services.GuildService = {}
 local GS                 = GC.Services.GuildService
-local INACTIVITY_THRESHOLD_DAYS = 7
 
 local function getActivePlayers()
     local players = GC.Services.DataStore:GetPlayers()
@@ -26,8 +25,73 @@ local function getActivePlayers()
 end
 
 local function getInactivityDays(player, now)
+    local purge = GC.Services and GC.Services.Purge
+    if purge and purge.GetPlayerDaysOffline then
+        return purge:GetPlayerDaysOffline(player)
+    end
+
+    local rosterDays = tonumber(player and player.offlineDays)
+    if rosterDays and rosterDays >= 0 then
+        return math.floor(rosterDays)
+    end
+
+    local rosterHours = tonumber(player and player.offlineHours)
+    if rosterHours and rosterHours >= 0 then
+        return math.floor(rosterHours / 24)
+    end
+
     local lastSeen = player and player.lastSeenAt or 0
-    return math.floor(math.max(0, (now - lastSeen) / 86400))
+    if lastSeen <= 0 then
+        return math.huge
+    end
+    return math.floor(math.max(0, ((now or time()) - lastSeen) / 86400))
+end
+
+local function getLiveGuildCounts()
+    if not GetNumGuildMembers then
+        return nil, nil
+    end
+
+    local total, online = GetNumGuildMembers()
+    return tonumber(total), tonumber(online)
+end
+
+local function getPurgeService()
+    return GC.Services and GC.Services.Purge or nil
+end
+
+local function getPurgeDaysOffline()
+    local purge = getPurgeService()
+    if purge and purge.GetPurgeDaysOffline then
+        return purge:GetPurgeDaysOffline()
+    end
+    return 30
+end
+
+local function getDashboardInactiveDays()
+    local purge = getPurgeService()
+    if purge and purge.GetDashboardInactiveDays then
+        return purge:GetDashboardInactiveDays()
+    end
+    -- Ready for Purge uses the purge rule directly; Dashboard Inactive uses
+    -- that same purge days offline rule minus 3, clamped at 0.
+    return math.max(0, getPurgeDaysOffline() - 3)
+end
+
+local function isMissingDiscordName(player)
+    local discordName = player and player.officerData and player.officerData.discordName
+    return GC.Utils.Trim(discordName or "") == ""
+end
+
+local function countsForDiscordDashboard(player)
+    local rankIndex = tonumber(player and player.rankIndex)
+    if not rankIndex or rankIndex < 0 or rankIndex > 3 then
+        return false
+    end
+    if (player.classification or "unknown") == "alt" then
+        return false
+    end
+    return true
 end
 
 -- Return sorted player list with derived display fields.
@@ -40,24 +104,33 @@ function GS:GetRosterList()
     local T   = GC.UI and GC.UI.Theme
     local now = time()
     local list = {}
+    local purgeDays = getPurgeDaysOffline()
+    local seenWarnDays = math.floor(purgeDays / 2)
+    local seenDangerDays = seenWarnDays + 1
 
     for _, p in pairs(players) do
         if p.status == "active" then
             local entry = {}
             for k, v in pairs(p) do entry[k] = v end
 
-            -- Status label
-            local lastSeen = p.lastSeenAt or 0
-            local daysSince = (now - lastSeen) / 86400
-            if daysSince <= 7 then
-                entry.statusLabel = "Active"
+            -- Status is current roster presence; Seen carries age/urgency.
+            if p.isOnline then
+                entry.statusLabel = "Online"
                 entry.statusKey   = "statusActive"
-            elseif daysSince <= 30 then
-                entry.statusLabel = "Idle"
-                entry.statusKey   = "statusWarn"
             else
-                entry.statusLabel = "Inactive"
-                entry.statusKey   = "statusInact"
+                entry.statusLabel = "Offline"
+                entry.statusKey   = "textDimmed"
+            end
+
+            local daysSince = getInactivityDays(p, now)
+            if daysSince <= 7 then
+                entry.seenColorKey = "statusActive"
+            elseif daysSince <= seenWarnDays then
+                entry.seenColorKey = "statusWarn"
+            elseif daysSince >= seenDangerDays then
+                entry.seenColorKey = "statusInact"
+            else
+                entry.seenColorKey = "textSecond"
             end
 
             -- Class color: use canonical class key (classFileName stored as p.class)
@@ -90,6 +163,7 @@ function GS:GetRosterList()
             entry.specDisplay = p.specialization or nil
             entry.classSpecDisplay = entry.specDisplay and (entry.classDisplayName .. " / " .. entry.specDisplay) or entry.classDisplayName
             entry.needsPrompt = entry.classification == "unknown"
+                and p.isTrackedRank ~= false
                 and not (p.promptState and (p.promptState.dismissedAt or p.promptState.bootstrapSuppressed))
 
             table.insert(list, entry)
@@ -169,36 +243,43 @@ end
 -- Dashboard summary stats
 function GS:GetStats()
     local activePlayers = getActivePlayers()
-    if #activePlayers == 0 then
-        return {total=0, active=0, inactive=0, idle=0, withAlts=0, totalPoints=0}
-    end
+    local DS        = GC.Services.DataStore
+    local logs      = DS:GetLogs()
+    local snapshot  = DS:GetLastSnapshot()
+    local liveTotal, liveOnline = getLiveGuildCounts()
 
     local now    = time()
+    local inactiveThresholdDays = getDashboardInactiveDays()
     local total, active, inactive, idle, withAlts, totalPoints = 0, 0, 0, 0, 0, 0
 
     for _, p in ipairs(activePlayers) do
         total = total + 1
-        local last = p.lastSeenAt or 0
-        local days = (now - last) / 86400
+        local days = getInactivityDays(p, now)
         if days <= 7 then active = active + 1
         elseif days <= 30 then idle = idle + 1
-        else inactive = inactive + 1 end
+        end
+        if days >= inactiveThresholdDays then inactive = inactive + 1 end
 
         if p.alts and #p.alts > 0 then withAlts = withAlts + 1 end
         totalPoints = totalPoints + (p.points and p.points.balance or 0)
     end
 
-    local DS      = GC.Services.DataStore
-    local logs     = DS:GetLogs()
-    local snapshot  = DS:GetLastSnapshot()
+    local snapshotTotal = snapshot and snapshot.summary and snapshot.summary.totalMembers or nil
+    local displayTotal = liveTotal or snapshotTotal or total
 
-    -- Count members online in latest snapshot
-    local online = 0
-    if snapshot and snapshot.members then
-        for _, m in pairs(snapshot.members) do
+    -- Prefer the same live guild count used by the footer. The snapshot
+    -- fallback keeps the dashboard useful when the WoW API is unavailable.
+    local online = liveOnline
+    if online == nil and snapshot then
+        online = 0
+        for _, m in pairs(snapshot.members or {}) do
+            if m.isOnline then online = online + 1 end
+        end
+        for _, m in pairs(snapshot.excluded or {}) do
             if m.isOnline then online = online + 1 end
         end
     end
+    online = online or 0
 
     -- Count events in the last 7 days
     local recentJoins, recentLeaves, recentRanks = 0, 0, 0
@@ -215,7 +296,7 @@ function GS:GetStats()
     end
 
     return {
-        total            = total,
+        total            = displayTotal,
         active           = active,
         idle             = idle,
         inactive         = inactive,
@@ -231,12 +312,17 @@ function GS:GetStats()
 end
 
 function GS:GetInactivityThresholdDays()
-    return INACTIVITY_THRESHOLD_DAYS
+    return getDashboardInactiveDays()
+end
+
+function GS:GetPurgeThresholdDays()
+    return getPurgeDaysOffline()
 end
 
 function GS:GetGuildInsights()
     local now = time()
     local thresholdDays = self:GetInactivityThresholdDays()
+    local purgeThresholdDays = self:GetPurgeThresholdDays()
     local counts = {
         initiatesNeedingReview = 0,
         missingDiscordVerification = 0,
@@ -249,13 +335,13 @@ function GS:GetGuildInsights()
         if normalizedRank == "initiate" then
             counts.initiatesNeedingReview = counts.initiatesNeedingReview + 1
         end
-        if not (player.officerData and player.officerData.discordVerified == true) then
+        if countsForDiscordDashboard(player) and isMissingDiscordName(player) then
             counts.missingDiscordVerification = counts.missingDiscordVerification + 1
         end
         if (player.classification or "unknown") == "unknown" then
             counts.unlinkedCharacters = counts.unlinkedCharacters + 1
         end
-        if getInactivityDays(player, now) >= thresholdDays then
+        if getInactivityDays(player, now) >= purgeThresholdDays then
             counts.inactiveMembers = counts.inactiveMembers + 1
         end
     end
@@ -266,10 +352,11 @@ end
 function GS:GetNeedsAttention(limit)
     local now = time()
     local thresholdDays = self:GetInactivityThresholdDays()
+    local purgeThresholdDays = self:GetPurgeThresholdDays()
     local rows = {}
     local seen = {}
 
-    local function addRow(player, issue, action, priority, colorKey)
+    local function addRow(player, issue, action, priority, colorKey, panel)
         if not player or seen[player.key] then
             return
         end
@@ -281,6 +368,7 @@ function GS:GetNeedsAttention(limit)
             action = action,
             priority = priority,
             colorKey = colorKey or "textAccent",
+            panel = panel or "roster",
         }
     end
 
@@ -288,19 +376,19 @@ function GS:GetNeedsAttention(limit)
 
     for _, player in ipairs(activePlayers) do
         if (player.classification or "unknown") == "unknown" then
-            addRow(player, "Unknown main/alt status", "Set Main / Link Alt", 1, "textAccent")
+            addRow(player, "Unknown main/alt status", "Set Main / Link Alt", 1, "textAccent", "roster")
         end
     end
 
     for _, player in ipairs(activePlayers) do
-        if not (player.officerData and player.officerData.discordVerified == true) then
-            addRow(player, "Missing Discord verification", "Verify Discord", 2, "textWarn")
+        if countsForDiscordDashboard(player) and isMissingDiscordName(player) then
+            addRow(player, "Missing Discord verification", "Verify Discord", 2, "textWarn", "roster")
         end
     end
 
     for _, player in ipairs(activePlayers) do
         if GC.Utils.NormalizeRankName(player.rankName) == "initiate" then
-            addRow(player, "Initiate needs review", "Review Initiate", 3, "textAccent")
+            addRow(player, "Initiate needs review", "Review Initiate", 3, "textAccent", "roster")
         end
     end
 
@@ -310,9 +398,10 @@ function GS:GetNeedsAttention(limit)
             addRow(
                 player,
                 string.format("Inactive %d+ days", inactiveDays),
-                "Review",
+                inactiveDays >= purgeThresholdDays and "Ready for Purge" or "Review Soon",
                 4,
-                "textWarn"
+                "textWarn",
+                "roster"
             )
         end
     end
@@ -324,7 +413,10 @@ function GS:GetNeedsAttention(limit)
         return (a.character or "") < (b.character or "")
     end)
 
-    limit = limit or 10
+    if not limit then
+        return rows
+    end
+
     local trimmed = {}
     for i = 1, math.min(limit, #rows) do
         trimmed[#trimmed + 1] = rows[i]
@@ -333,14 +425,15 @@ function GS:GetNeedsAttention(limit)
 end
 
 function GS:GetNeedsAttentionExportText()
-    local rows = self:GetNeedsAttention(10)
+    local rows = self:GetNeedsAttention()
     if #rows == 0 then
         return "Guild Insights\n\nNo urgent guild issues found."
     end
 
     local lines = {
         "Guild Insights",
-        "Inactivity Threshold: " .. tostring(self:GetInactivityThresholdDays()) .. " days",
+        "Dashboard Inactive Threshold: " .. tostring(self:GetInactivityThresholdDays()) .. " days",
+        "Ready for Purge Threshold: " .. tostring(self:GetPurgeThresholdDays()) .. " days",
         "",
         "Character | Issue | Suggested Action",
     }
@@ -426,6 +519,7 @@ function GS:GetPendingClassificationPrompt()
         local promptState = player.promptState or {}
         if player.status == "active"
             and player.classification == "unknown"
+            and player.isTrackedRank ~= false
             and not promptState.dismissedAt
             and not promptState.bootstrapSuppressed then
             if not chosen or (player.firstSeenAt or math.huge) < (chosen.firstSeenAt or math.huge) then

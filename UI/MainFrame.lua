@@ -14,6 +14,20 @@ local MF = GC.UI.MainFrame
 local function T() return GC.UI.Theme end
 local function GS() return GC.Services.GuildService end
 
+local function guildDisplayName()
+    local guildName = GetGuildInfo and GetGuildInfo("player") or nil
+    if not guildName or guildName == "" then
+        return ""
+    end
+
+    local realm = (GetNormalizedRealmName and GetNormalizedRealmName()) or (GetRealmName and GetRealmName()) or nil
+    if realm and realm ~= "" then
+        return string.format("%s - %s", guildName, realm)
+    end
+
+    return guildName
+end
+
 -- panels keyed by id; each has {frame, hasDetail, refresh}
 local panels      = {}
 local navButtons  = {}
@@ -28,6 +42,15 @@ local function saveUIState()
     if MF.frame and MF.frame:IsShown() then
         ui.windowX = MF.frame:GetLeft()
         ui.windowY = MF.frame:GetTop()
+    end
+end
+
+local function saveMiniState()
+    if not GC.DB or not GC.DB.Root then return end
+    local ui = GC.DB:GetUIState()
+    if MF.miniFrame and MF.miniFrame:IsShown() then
+        ui.miniX = MF.miniFrame:GetLeft()
+        ui.miniY = MF.miniFrame:GetTop()
     end
 end
 
@@ -161,6 +184,133 @@ function MF:RefreshPrompt()
     self.promptInput:SetText(prompt.main or "")
 end
 
+function MF:UpdateMiniFrame()
+    if not self.miniFrame then return end
+    if self.miniGuildLabel then
+        self.miniGuildLabel:SetText(guildDisplayName())
+    end
+    if self.miniCountLabel then
+        local total, online = GetNumGuildMembers()
+        total = total or 0
+        online = online or 0
+        self.miniCountLabel:SetText(online .. " / " .. total)
+    end
+end
+
+function MF:CreateMiniFrame()
+    if self.miniFrame then return end
+    local Th = T()
+    local uiState = GC.DB:GetUIState()
+
+    local mini = CreateFrame("Frame", "GuildCoreMiniFrame", UIParent)
+    mini:SetSize(236, 54)
+    mini:SetMovable(true)
+    mini:EnableMouse(true)
+    mini:RegisterForDrag("LeftButton")
+    mini:SetClampedToScreen(true)
+    if GC.UI.Layering then
+        GC.UI.Layering:ApplyMainFrame(mini)
+    else
+        mini:SetFrameStrata("DIALOG")
+        mini:SetFrameLevel(80)
+    end
+    if uiState.miniX and uiState.miniY then
+        mini:SetPoint("TOPLEFT", UIParent, "BOTTOMLEFT", uiState.miniX, uiState.miniY)
+    else
+        mini:SetPoint("CENTER", UIParent, "CENTER", 0, 260)
+    end
+    Th.Bg(mini, Th.c.chrome, Th.c.borderAccent)
+    mini:Hide()
+    self.miniFrame = mini
+
+    mini:SetScript("OnDragStart", mini.StartMoving)
+    mini:SetScript("OnDragStop", function(f)
+        f:StopMovingOrSizing()
+        saveMiniState()
+    end)
+    mini:SetScript("OnShow", function()
+        MF:UpdateMiniFrame()
+    end)
+    mini:SetScript("OnHide", function()
+        saveMiniState()
+    end)
+
+    local accent = mini:CreateTexture(nil, "ARTWORK")
+    accent:SetPoint("TOPLEFT"); accent:SetPoint("BOTTOMLEFT")
+    accent:SetWidth(3)
+    local ac = Th.c.accent
+    accent:SetColorTexture(ac[1], ac[2], ac[3], 1)
+
+    local title = Th.Fs(mini, "subheader", GC.Name or "Guild Core", "textAccent")
+    title:SetPoint("TOPLEFT", 12, -7)
+
+    local guild = Th.Fs(mini, "data", "", "textDimmed")
+    guild:SetPoint("TOPLEFT", 12, -28)
+    guild:SetPoint("RIGHT", mini, "RIGHT", -78, 0)
+    guild:SetJustifyH("LEFT")
+    self.miniGuildLabel = guild
+
+    local count = Th.Fs(mini, "data", "", "textSecond")
+    count:SetPoint("RIGHT", mini, "RIGHT", -44, -10)
+    self.miniCountLabel = count
+
+    local restoreBtn = CreateFrame("Button", nil, mini)
+    restoreBtn:SetSize(30, 30)
+    restoreBtn:SetPoint("RIGHT", mini, "RIGHT", -8, 0)
+    local restoreBg = restoreBtn:CreateTexture(nil, "BACKGROUND")
+    restoreBg:SetAllPoints()
+    restoreBg:SetColorTexture(0.120, 0.120, 0.162, 1)
+    local restoreFs = restoreBtn:CreateFontString(nil, "OVERLAY")
+    Th.ApplyFont(restoreFs, "subheader")
+    if Th.RegisterRefresh then
+        Th:RegisterRefresh(function()
+            T().ApplyFont(restoreFs, "subheader")
+        end)
+    end
+    restoreFs:SetAllPoints()
+    restoreFs:SetJustifyH("CENTER")
+    restoreFs:SetJustifyV("MIDDLE")
+    restoreFs:SetText("+")
+    restoreFs:SetTextColor(1, 1, 1, 1)
+    restoreBtn:SetScript("OnEnter", function()
+        restoreBg:SetColorTexture(0.185, 0.185, 0.245, 1)
+        GameTooltip:SetOwner(restoreBtn, "ANCHOR_RIGHT")
+        GameTooltip:SetText("Restore Guild Core", 1, 1, 1, 1, true)
+        GameTooltip:Show()
+    end)
+    restoreBtn:SetScript("OnLeave", function()
+        restoreBg:SetColorTexture(0.120, 0.120, 0.162, 1)
+        GameTooltip:Hide()
+    end)
+    restoreBtn:SetScript("OnClick", function()
+        MF:Restore()
+    end)
+
+end
+
+function MF:Minimize()
+    if not self.frame then return end
+    self:CreateMiniFrame()
+    local ui = GC.DB:GetUIState()
+    ui.minimized = true
+    saveUIState()
+    self.frame:Hide()
+    self:UpdateMiniFrame()
+    self.miniFrame:Show()
+end
+
+function MF:Restore()
+    if not self.frame then self:Create() end
+    self:CreateMiniFrame()
+    local ui = GC.DB:GetUIState()
+    ui.minimized = false
+    if self.miniFrame then
+        saveMiniState()
+        self.miniFrame:Hide()
+    end
+    self.frame:Show()
+end
+
 -- ──────────────────────────────────────────────
 -- Build
 -- ──────────────────────────────────────────────
@@ -171,7 +321,7 @@ function MF:Create()
 
     -- ── Window ──────────────────────────────────
     local frame = CreateFrame("Frame", "GuildCoreMainFrame", UIParent)
-    frame:SetSize(1280, 850)
+    frame:SetSize(1400, 865)
     frame:SetMovable(true)
     frame:EnableMouse(true)
     frame:RegisterForDrag("LeftButton")
@@ -230,8 +380,7 @@ function MF:Create()
     frame:SetScript("OnShow", function()
         shadow:Show()
         if MF.guildLabel then
-            local gn = GetGuildInfo and GetGuildInfo("player") or ""
-            MF.guildLabel:SetText(gn or "")
+            MF.guildLabel:SetText(guildDisplayName())
         end
         -- Update online/member count in status bar
         MF:UpdateMemberCount()
@@ -256,13 +405,43 @@ function MF:Create()
     local titleFs = Th.Fs(titleBar, "header", GC.Name or "Guild Core", "textAccent")
     titleFs:SetPoint("LEFT", 16, 5)
 
-    local guildName = GetGuildInfo and GetGuildInfo("player") or ""
-    local subFs = Th.Fs(titleBar, "small", guildName or "", "textDimmed")
-    subFs:SetPoint("LEFT", 16, -13)
+    local subFs = Th.Fs(titleBar, "subheader", guildDisplayName(), "textDimmed")
+    subFs:SetPoint("LEFT", 16, -14)
     self.guildLabel = subFs
 
-    local verFs = Th.Fs(titleBar, "tiny", "v" .. (GC.Version or "0"), "textDimmed")
-    verFs:SetPoint("RIGHT", -64, 0)
+    local verFs = Th.Fs(titleBar, "data", "v" .. (GC.Version or "0"), "textDimmed")
+    verFs:SetPoint("RIGHT", -100, 0)
+
+    -- Minimize button
+    local minBtn = CreateFrame("Button", nil, frame)
+    minBtn:SetSize(30, 30)
+    minBtn:SetPoint("TOPRIGHT", -45, -9)
+    local minBg = minBtn:CreateTexture(nil, "BACKGROUND")
+    minBg:SetAllPoints()
+    minBg:SetColorTexture(0.120, 0.120, 0.162, 1)
+    local minFs = minBtn:CreateFontString(nil, "OVERLAY")
+    Th.ApplyFont(minFs, "subheader")
+    if Th.RegisterRefresh then
+        Th:RegisterRefresh(function()
+            T().ApplyFont(minFs, "subheader")
+        end)
+    end
+    minFs:SetAllPoints(); minFs:SetJustifyH("CENTER"); minFs:SetJustifyV("MIDDLE")
+    minFs:SetText("-"); minFs:SetTextColor(1, 1, 1, 1)
+    minBtn:SetScript("OnEnter", function()
+        minBg:SetColorTexture(0.185, 0.185, 0.245, 1)
+        GameTooltip:SetOwner(minBtn, "ANCHOR_RIGHT")
+        GameTooltip:SetText("Minimize Guild Core", 1, 1, 1, 1, true)
+        GameTooltip:AddLine("Collapse into a small draggable frame.", 0.8, 0.8, 0.8, true)
+        GameTooltip:Show()
+    end)
+    minBtn:SetScript("OnLeave", function()
+        minBg:SetColorTexture(0.120, 0.120, 0.162, 1)
+        GameTooltip:Hide()
+    end)
+    minBtn:SetScript("OnClick", function()
+        MF:Minimize()
+    end)
 
     -- Close button
     local closeBtn = CreateFrame("Button", nil, frame)
@@ -292,15 +471,15 @@ function MF:Create()
     local statusEdge = statusBar:CreateTexture(nil, "ARTWORK")
     statusEdge:SetPoint("TOPLEFT"); statusEdge:SetPoint("TOPRIGHT"); statusEdge:SetHeight(1)
     statusEdge:SetColorTexture(ac[1], ac[2], ac[3], 0.18)
-    local statusFs = Th.Fs(statusBar, "small", "", "textDimmed")
+    local statusFs = Th.Fs(statusBar, "data", "", "textDimmed")
     statusFs:SetPoint("LEFT", 12, 0)
     self.statusLabel = statusFs
 
-    local memberFs = Th.Fs(statusBar, "tiny", "", "textDimmed")
+    local memberFs = Th.Fs(statusBar, "data", "", "textDimmed")
     memberFs:SetPoint("RIGHT", -12, 0)
     self.memberCountLabel = memberFs
 
-    local footerFs = Th.Fs(statusBar, "tiny", "\194\169 2026 AddOns by Catastrophie", "textDimmed")
+    local footerFs = Th.Fs(statusBar, "data", "\194\169 2026 AddOns by Catastrophie", "textDimmed")
     footerFs:SetPoint("CENTER", statusBar, "CENTER", 0, 0)
     footerFs:SetTextColor(1, 0.55, 0.1, 1)
 
@@ -319,6 +498,8 @@ function MF:Create()
     local navItems = {
         {id = "dashboard",  label = "Dashboard"},
         {id = "roster",     label = "Roster"},
+        {id = "purge",      label = "Purge"},
+        {id = "invite",     label = "Invite"},
         {id = "log",        label = "Activity"},
         {id = "messaging",  label = "Messages"},
         {id = "settings",   label = "Settings"},
@@ -415,7 +596,7 @@ function MF:Create()
     local promptTitle = Th.Fs(promptFrame, "tiny", "Classification Prompt", "textAccent")
     promptTitle:SetPoint("TOPLEFT", 10, -6)
 
-    local promptLabel = Th.Fs(promptFrame, "small", "", "textSecond")
+    local promptLabel = Th.Fs(promptFrame, "data", "", "textSecond")
     promptLabel:SetPoint("TOPLEFT", 10, -20)
     promptLabel:SetPoint("TOPRIGHT", promptFrame, "TOPRIGHT", -390, -20)
     promptLabel:SetJustifyH("LEFT")
@@ -475,14 +656,18 @@ function MF:Create()
 
     -- ── Create panels ─────────────────────────────
     GC.UI.Dashboard:Create(panelHost)
+    GC.UI.PurgePanel:Create(panelHost)
     GC.UI.RosterPanel:Create(panelHost)
     GC.UI.PlayerPanel:Create(detailCol)
+    GC.UI.InvitePanel:Create(panelHost)
     GC.UI.LogPanel:Create(panelHost)
     GC.UI.MessagingPanel:Create(panelHost)
     GC.UI.SettingsPanel:Create(panelHost)
 
     panels.dashboard  = {frame = GC.UI.Dashboard.frame,       refresh = function() GC.UI.Dashboard:Refresh()       end, hasDetail = false}
     panels.roster     = {frame = GC.UI.RosterPanel.frame,     refresh = function() GC.UI.RosterPanel:Refresh()     end, hasDetail = true}
+    panels.purge      = {frame = GC.UI.PurgePanel.frame,      refresh = function() GC.UI.PurgePanel:Refresh()      end, hasDetail = false}
+    panels.invite     = {frame = GC.UI.InvitePanel.frame,     refresh = function() GC.UI.InvitePanel:Refresh()     end, hasDetail = false}
     panels.log        = {frame = GC.UI.LogPanel.frame,        refresh = function() GC.UI.LogPanel:Refresh()        end, hasDetail = false}
     panels.messaging  = {frame = GC.UI.MessagingPanel.frame,  refresh = function() GC.UI.MessagingPanel:Refresh()  end, hasDetail = false}
     panels.settings   = {frame = GC.UI.SettingsPanel.frame,   refresh = function() GC.UI.SettingsPanel:Refresh()   end, hasDetail = false}
@@ -508,19 +693,32 @@ end
 
 function GC.UI:Show()
     if not MF.frame then MF:Create() end
+    MF:CreateMiniFrame()
     if GC.UI.Layering then
         GC.UI.Layering:ApplyMainFrame(MF.frame)
+        GC.UI.Layering:ApplyMainFrame(MF.miniFrame)
     end
+    local ui = GC.DB:GetUIState()
+    if ui.minimized then
+        MF.frame:Hide()
+        MF:UpdateMiniFrame()
+        MF.miniFrame:Show()
+        return
+    end
+    if MF.miniFrame then MF.miniFrame:Hide() end
     MF.frame:Show()
 end
 
 function GC.UI:Hide()
     if MF.frame then MF.frame:Hide() end
+    if MF.miniFrame then MF.miniFrame:Hide() end
 end
 
 function GC.UI:Toggle()
     if MF.frame and MF.frame:IsShown() then
         GC.UI:Hide()
+    elseif MF.miniFrame and MF.miniFrame:IsShown() then
+        MF:Restore()
     else
         GC.UI:Show()
     end

@@ -13,7 +13,12 @@ local function messages()
 end
 
 local function trim(value)
-    return GC.Utils.Trim(value or "")
+    -- Safe fallback if GC.Utils is not yet loaded
+    if GC.Utils and GC.Utils.Trim then
+        return GC.Utils.Trim(value or "")
+    end
+    value = tostring(value or "")
+    return (value:match("^%s*(.-)%s*$"))
 end
 
 local function lowerText(value)

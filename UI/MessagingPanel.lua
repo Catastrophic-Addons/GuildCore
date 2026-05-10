@@ -149,13 +149,13 @@ local function buildCategoryRow(row, item)
     row._item = item
 
     if not row._name then
-        local nameFs = Th.Fs(row, "small", "", "textPrimary")
+        local nameFs = Th.Fs(row, "data", "", "textPrimary")
         nameFs:SetPoint("LEFT", 8, 0)
         nameFs:SetPoint("RIGHT", row, "RIGHT", -48, 0)
         nameFs:SetJustifyH("LEFT")
         row._name = nameFs
 
-        local countFs = Th.Fs(row, "tiny", "", "textDimmed")
+        local countFs = Th.Fs(row, "data", "", "textDimmed")
         countFs:SetPoint("RIGHT", -8, 0)
         countFs:SetJustifyH("RIGHT")
         row._count = countFs
@@ -582,11 +582,16 @@ function MP:EnsureTemplateBridgeDialog()
     end
 
     local Th = T()
-    local dialog = CreateFrame("Frame", nil, self.frame)
+    local dialog = CreateFrame("Frame", nil, UIParent)
     dialog:SetSize(560, 420)
-    dialog:SetPoint("CENTER", self.frame, "CENTER", 0, 0)
+    dialog:SetPoint("CENTER", UIParent, "CENTER", 0, 0)
     dialog:SetFrameStrata("DIALOG")
+    dialog:SetFrameLevel(100)
     dialog:EnableMouse(true)
+    dialog:SetMovable(true)
+    dialog:RegisterForDrag("LeftButton")
+    dialog:SetScript("OnDragStart", function(self) self:StartMoving() end)
+    dialog:SetScript("OnDragStop",  function(self) self:StopMovingOrSizing() end)
     dialog:Hide()
     Th.Bg(dialog, Th.c.panel, Th.c.borderStrong)
 
@@ -594,7 +599,7 @@ function MP:EnsureTemplateBridgeDialog()
     title:SetPoint("TOPLEFT", 14, -14)
     dialog.title = title
 
-    local info = Th.Fs(dialog, "small", "", "textDimmed")
+    local info = Th.Fs(dialog, "data", "", "textDimmed")
     info:SetPoint("TOPLEFT", title, "BOTTOMLEFT", 0, -8)
     info:SetPoint("TOPRIGHT", dialog, "TOPRIGHT", -14, -42)
     info:SetJustifyH("LEFT")
@@ -606,7 +611,7 @@ function MP:EnsureTemplateBridgeDialog()
     dialog.editHolder = holder
     dialog.edit = edit
 
-    local summary = Th.Fs(dialog, "small", "", "textWarn")
+    local summary = Th.Fs(dialog, "data", "", "textWarn")
     summary:SetPoint("TOPLEFT", holder, "BOTTOMLEFT", 0, -8)
     summary:SetPoint("TOPRIGHT", dialog, "TOPRIGHT", -14, 0)
     summary:SetJustifyH("LEFT")
@@ -762,18 +767,18 @@ local function buildMessageRow(row, item)
         end)
         row._sendBtn = sendBtn
 
-        local titleFs = Th.Fs(row, "small", "", "textPrimary")
+        local titleFs = Th.Fs(row, "data", "", "textPrimary")
         titleFs:SetPoint("TOPLEFT", 28, -5)
         titleFs:SetPoint("TOPRIGHT", -56, -5)
         titleFs:SetJustifyH("LEFT")
         row._title = titleFs
 
-        local stampFs = Th.Fs(row, "tiny", "", "textDimmed")
+        local stampFs = Th.Fs(row, "data", "", "textDimmed")
         stampFs:SetPoint("BOTTOMLEFT", 28, 5)
         stampFs:SetJustifyH("LEFT")
         row._stamp = stampFs
 
-        local subFs = Th.Fs(row, "tiny", "", "textSecond")
+        local subFs = Th.Fs(row, "data", "", "textSecond")
         subFs:SetPoint("BOTTOMLEFT", 128, 5)
         subFs:SetPoint("BOTTOMRIGHT", -56, 5)
         subFs:SetJustifyH("LEFT")
@@ -802,13 +807,13 @@ local function buildHistoryRow(row, item)
     row._item = item
 
     if not row._title then
-        local titleFs = Th.Fs(row, "tiny", "", "textPrimary")
+        local titleFs = Th.Fs(row, "data", "", "textPrimary")
         titleFs:SetPoint("TOPLEFT", 6, -5)
         titleFs:SetPoint("TOPRIGHT", -6, -5)
         titleFs:SetJustifyH("LEFT")
         row._title = titleFs
 
-        local metaFs = Th.Fs(row, "tiny", "", "textDimmed")
+        local metaFs = Th.Fs(row, "data", "", "textDimmed")
         metaFs:SetPoint("BOTTOMLEFT", 6, 5)
         metaFs:SetPoint("BOTTOMRIGHT", -6, 5)
         metaFs:SetJustifyH("LEFT")
@@ -836,15 +841,15 @@ local function buildPreviewRow(row, item)
     row._item = item
 
     if not row._idx then
-        local idxFs = Th.Fs(row, "tiny", "", "textAccent")
+        local idxFs = Th.Fs(row, "data", "", "textAccent")
         idxFs:SetPoint("TOPLEFT", 8, -5)
         row._idx = idxFs
 
-        local lenFs = Th.Fs(row, "tiny", "", "textDimmed")
+        local lenFs = Th.Fs(row, "data", "", "textDimmed")
         lenFs:SetPoint("TOPRIGHT", -8, -5)
         row._len = lenFs
 
-        local textFs = Th.Fs(row, "small", "", "textSecond")
+        local textFs = Th.Fs(row, "data", "", "textSecond")
         textFs:SetPoint("TOPLEFT", 8, -18)
         textFs:SetPoint("TOPRIGHT", -8, -18)
         textFs:SetPoint("BOTTOMLEFT", 8, 5)
@@ -1465,7 +1470,7 @@ function MP:Create(parent)
     templatesCard:SetWidth(256)
 
     local messageNewBtn = GC.UI.Button.Create(templatesContent, "New", "primary", 46, Th.btnH)
-    messageNewBtn:SetPoint("TOPLEFT", 0, 0)
+    messageNewBtn:SetPoint("TOPLEFT", 0, -4)
     messageNewBtn:SetScript("OnClick", function()
         local svc = MS()
         self:ResetDraft(svc and svc:GetSelectedCategoryId() or "general")
@@ -1603,17 +1608,17 @@ function MP:Create(parent)
     self.archiveBtn = archiveBtn
 
     local searchLabel = Th.Fs(templatesContent, "tiny", "Search", "textDimmed")
-    searchLabel:SetPoint("TOPLEFT", duplicateBtn, "BOTTOMLEFT", 0, -8)
+    searchLabel:SetPoint("TOPLEFT", duplicateBtn, "BOTTOMLEFT", 0, -14)
 
-    local searchInput = GC.UI.Panel.Input(templatesContent, 126, Th.inputH)
-    searchInput:SetPoint("LEFT", searchLabel, "RIGHT", 6, 0)
+    local searchInput = GC.UI.Panel.Input(templatesContent, 170, Th.inputH)
+    searchInput:SetPoint("TOPLEFT", searchLabel, "BOTTOMLEFT", 0, -4)
     searchInput:SetScript("OnTextChanged", function()
         self:Refresh()
     end)
     self.searchInput = searchInput
 
     local showArchivedBtn = GC.UI.Button.Create(templatesContent, "Archived: Off", "secondary", 92, Th.btnH)
-    showArchivedBtn:SetPoint("TOPLEFT", searchLabel, "BOTTOMLEFT", 0, -8)
+    showArchivedBtn:SetPoint("TOPLEFT", searchInput, "BOTTOMLEFT", 0, -8)
     showArchivedBtn:SetScript("OnClick", function()
         self.showArchived = not self.showArchived
         self:Refresh()
@@ -1693,7 +1698,7 @@ function MP:Create(parent)
     previewCard:SetPoint("LEFT", templatesCard, "RIGHT", 10, 0)
     previewCard:SetPoint("RIGHT", frame, "RIGHT", -P, 0)
     previewCard:SetPoint("BOTTOM", frame, "BOTTOM", 0, P)
-    previewCard:SetHeight(272)
+    previewCard:SetHeight(380)
 
     local editorCard, editorContent = GC.UI.Panel.Section(frame, "Editor")
     editorCard:SetPoint("TOPLEFT", templatesCard, "TOPRIGHT", 10, 0)
@@ -1716,7 +1721,7 @@ function MP:Create(parent)
     end)
     self.titleInput = titleInput
 
-    local assignedCategoryFs = Th.Fs(editorContent, "small", "General", "textAccent")
+    local assignedCategoryFs = Th.Fs(editorContent, "data", "General", "textAccent")
     assignedCategoryFs:SetPoint("TOPLEFT", categoryLabel, "BOTTOMLEFT", 0, -8)
     self.assignedCategoryLabel = assignedCategoryFs
 
@@ -1751,7 +1756,7 @@ function MP:Create(parent)
     bodyLabel:SetPoint("TOPLEFT", notesInput, "BOTTOMLEFT", 0, -14)
 
     local placeholderPickerBtn = GC.UI.Button.Create(editorContent, "@player.name", "secondary", 112, Th.btnH)
-    placeholderPickerBtn:SetPoint("LEFT", bodyLabel, "RIGHT", 12, 0)
+    placeholderPickerBtn:SetPoint("TOPLEFT", bodyLabel, "BOTTOMLEFT", 0, -6)
     placeholderPickerBtn:SetTooltip("Placeholder Picker", "Cycles through available placeholders.")
     placeholderPickerBtn:SetScript("OnClick", function()
         self:CyclePlaceholder()
@@ -1767,7 +1772,7 @@ function MP:Create(parent)
     self.insertPlaceholderBtn = insertPlaceholderBtn
 
     local bodyHolder, bodyInput = createMultilineInput(editorContent, 210)
-    bodyHolder:SetPoint("TOPLEFT", bodyLabel, "BOTTOMLEFT", 0, -6)
+    bodyHolder:SetPoint("TOPLEFT", placeholderPickerBtn, "BOTTOMLEFT", 0, -6)
     bodyHolder:SetPoint("BOTTOMRIGHT", editorContent, "BOTTOMRIGHT", 0, 0)
     bodyInput:SetScript("OnTextChanged", function(self)
         self:SetWidth(math.max(120, bodyHolder:GetWidth() - 18))
@@ -1779,7 +1784,7 @@ function MP:Create(parent)
     end)
     self.bodyInput = bodyInput
 
-    local bodyCountFs = Th.Fs(editorContent, "tiny", "0 chars", "textDimmed")
+    local bodyCountFs = Th.Fs(editorContent, "data", "0 chars", "textDimmed")
     bodyCountFs:SetPoint("RIGHT", editorContent, "RIGHT", 0, 0)
     bodyCountFs:SetPoint("TOP", bodyLabel, "TOP", 0, 0)
     self.bodyCountLabel = bodyCountFs
@@ -1788,9 +1793,12 @@ function MP:Create(parent)
     previewInfoFs:SetPoint("TOPLEFT", 0, 0)
     previewInfoFs:SetPoint("TOPRIGHT", previewContent, "TOPRIGHT", 0, 0)
     previewInfoFs:SetJustifyH("LEFT")
+    previewInfoFs:SetWordWrap(true)
 
     local placeholderFs = Th.Fs(previewContent, "tiny", "@player.name  @guild.name  @target.name  @discord.name  @main.name  @role.name  @date.today  @time.now", "textDimmed")
-    placeholderFs:SetPoint("TOPLEFT", previewInfoFs, "BOTTOMLEFT", 0, -6)
+    placeholderFs:SetPoint("TOPLEFT", previewInfoFs, "BOTTOMLEFT", 0, -8)
+    placeholderFs:SetWidth(560)
+    placeholderFs:SetWordWrap(false)
     self.placeholderHintLabel = placeholderFs
 
     local placeholderWarningFs = Th.Fs(previewContent, "tiny", "", "textWarn")
@@ -1804,7 +1812,7 @@ function MP:Create(parent)
     channelLabel:SetPoint("TOPLEFT", placeholderWarningFs, "BOTTOMLEFT", 0, -8)
 
     local channelBtn = GC.UI.Button.Create(previewContent, "Guild", "secondary", 74, Th.btnH)
-    channelBtn:SetPoint("LEFT", channelLabel, "RIGHT", 6, 0)
+    channelBtn:SetPoint("TOPLEFT", channelLabel, "BOTTOMLEFT", 0, -4)
     channelBtn:SetTooltip("Target Channel", "Cycles the channel used when queueing, sending, or loading chunks.")
     channelBtn:SetScript("OnClick", function()
         self:CycleChannel()
@@ -1812,11 +1820,11 @@ function MP:Create(parent)
     self.channelBtn = channelBtn
 
     local recipientLabel = Th.Fs(previewContent, "tiny", "Recipient", "textDimmed")
-    recipientLabel:SetPoint("LEFT", channelBtn, "RIGHT", 14, 0)
+    recipientLabel:SetPoint("TOPLEFT", channelLabel, "TOPLEFT", 94, 0)
     self.recipientLabel = recipientLabel
 
     local recipientInput = GC.UI.Panel.Input(previewContent, 110, Th.inputH)
-    recipientInput:SetPoint("LEFT", recipientLabel, "RIGHT", 6, 0)
+    recipientInput:SetPoint("TOPLEFT", recipientLabel, "BOTTOMLEFT", 0, -4)
     recipientInput:SetScript("OnTextChanged", function()
         if self.currentDraft then
             self.currentDraft.dirty = true
@@ -1825,7 +1833,7 @@ function MP:Create(parent)
     self.recipientInput = recipientInput
 
     local targetLabel = Th.Fs(previewContent, "tiny", "Target", "textDimmed")
-    targetLabel:SetPoint("TOPLEFT", channelLabel, "BOTTOMLEFT", 0, -10)
+    targetLabel:SetPoint("TOPLEFT", channelBtn, "BOTTOMLEFT", 0, -20)
 
     local targetInput = GC.UI.Panel.Input(previewContent, 108, Th.inputH)
     targetInput:SetPoint("LEFT", targetLabel, "RIGHT", 6, 0)
@@ -1853,7 +1861,7 @@ function MP:Create(parent)
     self.limitInput = limitInput
 
     local previewBtn = GC.UI.Button.Create(previewContent, "Preview", "primary", 62, Th.btnH)
-    previewBtn:SetPoint("TOPLEFT", targetLabel, "BOTTOMLEFT", 0, -10)
+    previewBtn:SetPoint("TOPLEFT", targetInput, "BOTTOMLEFT", 0, -8)
     previewBtn:SetScript("OnClick", function()
         self:RefreshPreview()
     end)
@@ -2026,20 +2034,24 @@ function MP:Create(parent)
     end)
     self.clearQueueBtn = clearQueueBtn
 
-    local autoStatusFs = Th.Fs(previewContent, "small", "", "textAccent")
-    autoStatusFs:SetPoint("LEFT", clearQueueBtn, "RIGHT", 12, 0)
-    self.autoStatusLabel = autoStatusFs
+    -- Status block: three stacked lines (mode / queue / chunks)
+    local modeStatusFs = Th.Fs(previewContent, "data", "", "textAccent")
+    modeStatusFs:SetPoint("TOPLEFT", sendNextBtn, "BOTTOMLEFT", 0, -8)
+    modeStatusFs:SetWidth(360)
+    self.modeStatusLabel = modeStatusFs
 
-    local queueCountFs = Th.Fs(previewContent, "small", "", "textDimmed")
-    queueCountFs:SetPoint("LEFT", autoStatusFs, "RIGHT", 12, 0)
-    self.queueCountLabel = queueCountFs
+    local queueStatusFs = Th.Fs(previewContent, "data", "", "textDimmed")
+    queueStatusFs:SetPoint("TOPLEFT", modeStatusFs, "BOTTOMLEFT", 0, -2)
+    queueStatusFs:SetWidth(360)
+    self.queueStatusLabel = queueStatusFs
 
-    local previewCountFs = Th.Fs(previewContent, "small", "", "textAccent")
-    previewCountFs:SetPoint("LEFT", queueCountFs, "RIGHT", 12, 0)
-    self.previewCountLabel = previewCountFs
+    local chunksStatusFs = Th.Fs(previewContent, "data", "", "textDimmed")
+    chunksStatusFs:SetPoint("TOPLEFT", queueStatusFs, "BOTTOMLEFT", 0, -2)
+    chunksStatusFs:SetWidth(360)
+    self.chunksStatusLabel = chunksStatusFs
 
     local previewListFrame = CreateFrame("Frame", nil, previewContent)
-    previewListFrame:SetPoint("TOPLEFT", sendNextBtn, "BOTTOMLEFT", 0, -10)
+    previewListFrame:SetPoint("TOPLEFT", chunksStatusFs, "BOTTOMLEFT", 0, -8)
     previewListFrame:SetPoint("BOTTOMRIGHT", previewContent, "BOTTOMRIGHT", -210, 0)
     self.previewList = GC.UI.List.Create(previewListFrame, PREVIEW_ROW_HEIGHT, buildPreviewRow, function(item)
         self.selectedPreviewKey = item.key
@@ -2058,6 +2070,78 @@ function MP:Create(parent)
 
     self:RefreshPlaceholderPicker()
     self:ResetDraft("general")
+end
+
+function MP:UpdateStatusDisplay()
+    local svc = MS()
+    local Th  = T()
+    if not svc then
+        if self.modeStatusLabel  then self.modeStatusLabel:SetText("") end
+        if self.queueStatusLabel then
+            local c = Th.c.textDanger
+            self.queueStatusLabel:SetTextColor(c[1], c[2], c[3], c[4] or 1)
+            self.queueStatusLabel:SetText("Service unavailable.")
+        end
+        if self.chunksStatusLabel then self.chunksStatusLabel:SetText("") end
+        return
+    end
+
+    local autoSending = svc:IsAutoSending()
+    local autoEnabled = svc:GetAutomationEnabled()
+    local health      = svc:GetQueueHealth()
+    local chunkCount  = #(self.previewData or {})
+
+    -- Mode line
+    local modeText
+    if autoSending then
+        local remaining = svc:GetSendCooldownRemaining()
+        if remaining > 0 then
+            modeText = string.format("Auto Mode: running (next in %.1fs)", remaining)
+        else
+            modeText = "Auto Mode: running"
+        end
+    elseif autoEnabled then
+        modeText = "Auto Mode: idle"
+    else
+        modeText = "Manual Mode"
+    end
+
+    -- Queue status line (health-aware)
+    local queueText, queueColorKey
+    local st = health.status
+    if st == "unavailable" or st == "malformed" then
+        queueText     = "Queue error - clear required"
+        queueColorKey = "textDanger"
+    elseif st == "blocked" then
+        queueText     = "Queue blocked - " .. (health.message or "first entry is invalid")
+        queueColorKey = "textDanger"
+    elseif st == "partial" then
+        queueText     = "Queue: " .. (health.message or (health.queueSize .. " queued"))
+        queueColorKey = "textWarn"
+    elseif st == "healthy" then
+        queueText     = string.format("Queue: %d queued", health.queueSize)
+        queueColorKey = "textDimmed"
+    else
+        queueText     = "Queue: empty"
+        queueColorKey = "textDimmed"
+    end
+
+    -- Chunks line
+    local chunksText = chunkCount > 0
+        and string.format("%d chunk%s prepared", chunkCount, chunkCount == 1 and "" or "s")
+        or ""
+
+    if self.modeStatusLabel then
+        self.modeStatusLabel:SetText(modeText)
+    end
+    if self.queueStatusLabel then
+        local c = Th.c[queueColorKey] or Th.c.textDimmed
+        self.queueStatusLabel:SetTextColor(c[1], c[2], c[3], c[4] or 1)
+        self.queueStatusLabel:SetText(queueText)
+    end
+    if self.chunksStatusLabel then
+        self.chunksStatusLabel:SetText(chunksText)
+    end
 end
 
 function MP:Refresh()
@@ -2132,15 +2216,9 @@ function MP:Refresh()
     local autoEnabled = svc:GetAutomationEnabled()
     local autoSending = svc:IsAutoSending()
     local selectedMessage = draft.id and svc:GetMessage(draft.id) or nil
-    local queueReport = svc.ValidateQueue and svc:ValidateQueue() or nil
+    local queueHealth = svc:GetQueueHealth()
 
-    if queueReport and (queueReport.invalidCount or 0) > 0 then
-        self.queueCountLabel:SetText(string.format("%d queued (%d invalid)", queueSize, queueReport.invalidCount))
-    else
-        self.queueCountLabel:SetText(string.format("%d queued", queueSize))
-    end
-    self.previewCountLabel:SetText(string.format("%d chunks", #(self.previewData or {})))
-    self.autoStatusLabel:SetText(svc:GetAutoSendStatus())
+    self:UpdateStatusDisplay()
     self.modeBtn:SetLabel(autoEnabled and "Mode: Auto" or "Mode: Manual")
     self.showArchivedBtn:SetLabel(self.showArchived and "Archived: On" or "Archived: Off")
     self.favoritesOnlyBtn:SetLabel(self.favoritesOnly and "Favs: On" or "Favs: Off")
@@ -2184,10 +2262,12 @@ function MP:Refresh()
     self.previewBtn:SetEnabled(not disabled)
     self.queuePreviewBtn:SetEnabled(not disabled and hasPreview)
     self.loadChunkBtn:SetEnabled(not disabled and hasPreview)
-    self.sendNextBtn:SetEnabled(not disabled and queueSize > 0)
-    self.startAutoBtn:SetEnabled(not disabled and not autoSending and queueSize > 0)
+    local queueSendable  = (queueHealth.status == "healthy" or queueHealth.status == "partial") and queueSize > 0
+    local queueClearable = queueSize > 0 or queueHealth.status == "malformed"
+    self.sendNextBtn:SetEnabled(not disabled and queueSendable)
+    self.startAutoBtn:SetEnabled(not disabled and not autoSending and queueSendable)
     self.stopAutoBtn:SetEnabled(not disabled and autoSending)
-    self.clearQueueBtn:SetEnabled(not disabled and queueSize > 0)
+    self.clearQueueBtn:SetEnabled(not disabled and queueClearable)
     self.modeBtn:SetEnabled(not disabled)
     self.channelBtn:SetEnabled(not disabled)
 

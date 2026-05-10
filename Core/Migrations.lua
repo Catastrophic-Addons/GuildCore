@@ -36,6 +36,10 @@ local function normalizeTargetChannel(channelId)
     return supported[channelId] and channelId or "GUILD"
 end
 
+local function maxPlayerLevel()
+    return (GetMaxPlayerLevel and tonumber(GetMaxPlayerLevel())) or 90
+end
+
 local function ensureMessagesState(guild)
     if type(guild.messageHistory) ~= "table" then
         guild.messageHistory = {}
@@ -144,6 +148,109 @@ local function ensureMessagingCampaignsState(guild)
     end
 end
 
+local function ensurePurgeState(guild)
+    guild.purge = guild.purge or {}
+    guild.purge.queue = type(guild.purge.queue) == "table" and guild.purge.queue or {}
+    guild.purge.candidates = type(guild.purge.candidates) == "table" and guild.purge.candidates or {}
+    guild.purge.protected = type(guild.purge.protected) == "table" and guild.purge.protected or {}
+    guild.purge.log = type(guild.purge.log) == "table" and guild.purge.log or {}
+    guild.purge.meta = type(guild.purge.meta) == "table" and guild.purge.meta or {}
+    guild.purge.meta.daysOffline = math.max(3, math.floor(tonumber(guild.purge.meta.daysOffline) or 3))
+    guild.purge.meta.safeTags = type(guild.purge.meta.safeTags) == "table"
+        and guild.purge.meta.safeTags
+        or { "PROTECTED", "LEAVE", "OFFICER ALT", "DO NOT KICK" }
+    guild.purge.meta.includeRanks = type(guild.purge.meta.includeRanks) == "table"
+        and guild.purge.meta.includeRanks
+        or { "Initiate", "Member" }
+    if guild.purge.meta.includeAllRanks == nil then
+        guild.purge.meta.includeAllRanks = true
+    end
+    if guild.purge.meta.exemptLinkedCharacters == nil then
+        guild.purge.meta.exemptLinkedCharacters = true
+    end
+end
+
+local function ensureInviteState(guild)
+    local inviteDefaults = ns.Defaults and ns.Defaults.invite or {}
+
+    guild.invite = type(guild.invite) == "table" and guild.invite or {}
+
+    guild.invite.meta = type(guild.invite.meta) == "table" and guild.invite.meta or {}
+    GC.Utils.MergeDefaults(guild.invite.meta, inviteDefaults.meta or {})
+
+    guild.invite.settings = type(guild.invite.settings) == "table" and guild.invite.settings or {}
+    local settings = guild.invite.settings
+    GC.Utils.MergeDefaults(settings, inviteDefaults.settings or {})
+    local maxLevel = maxPlayerLevel()
+    if settings.levelMax == nil or tonumber(settings.levelMax) == 80 then
+        settings.levelMax = maxLevel
+    end
+    if settings.scanLevelMax == nil or tonumber(settings.scanLevelMax) == 80 then
+        settings.scanLevelMax = maxLevel
+    end
+    if type(settings.scanLevelBands) ~= "table" or #settings.scanLevelBands == 0 then
+        settings.scanLevelBands = {
+            { min = 75, max = maxLevel },
+            { min = 50, max = 74 },
+            { min = 25, max = 49 },
+            { min = 1, max = 24 },
+        }
+    end
+    if type(settings.scanLevelBands) == "table" then
+        for _, band in ipairs(settings.scanLevelBands) do
+            if type(band) == "table" and tonumber(band.max) == 80 then
+                band.max = maxLevel
+            end
+        end
+    end
+    if settings.guildRealmOverride == "" then
+        settings.guildRealmOverride = nil
+    end
+    if settings.debugEnabled == nil then
+        settings.debugEnabled = false
+    end
+    if settings.showGuildedCandidates == nil then
+        settings.showGuildedCandidates = false
+    end
+    if settings.showRecentlyInvitedCandidates == nil then
+        settings.showRecentlyInvitedCandidates = false
+    end
+    if settings.showRecentlyDeclinedCandidates == nil then
+        settings.showRecentlyDeclinedCandidates = false
+    end
+    if settings.autoAdvanceScan == nil then
+        settings.autoAdvanceScan = false
+    end
+    if settings.scanAdvanceDelaySeconds == nil then
+        settings.scanAdvanceDelaySeconds = 3
+    end
+    if settings.whoCapThreshold == nil then
+        settings.whoCapThreshold = 50
+    end
+    if settings.maxSplitDepth == nil then
+        settings.maxSplitDepth = 6
+    end
+    if settings.inviteDelaySeconds == nil or tonumber(settings.inviteDelaySeconds) == 8 then
+        settings.inviteDelaySeconds = 3
+    end
+    if settings.inviteResponseTimeoutSeconds == nil then
+        settings.inviteResponseTimeoutSeconds = 20
+    end
+
+    guild.invite.ignored = type(guild.invite.ignored) == "table" and guild.invite.ignored or {}
+    GC.Utils.MergeDefaults(guild.invite.ignored, inviteDefaults.ignored or {})
+    guild.invite.recentInvites = type(guild.invite.recentInvites) == "table" and guild.invite.recentInvites or {}
+    guild.invite.recentDeclines = type(guild.invite.recentDeclines) == "table" and guild.invite.recentDeclines or {}
+    guild.invite.cooldowns = type(guild.invite.cooldowns) == "table" and guild.invite.cooldowns or {}
+    guild.invite.history = type(guild.invite.history) == "table" and guild.invite.history or {}
+    guild.invite.ui = type(guild.invite.ui) == "table" and guild.invite.ui or {}
+    GC.Utils.MergeDefaults(guild.invite.ui, inviteDefaults.ui or {})
+
+    while #guild.invite.history > 500 do
+        table.remove(guild.invite.history, 1)
+    end
+end
+
 local function migrateGuild(guild)
     guild.settings = guild.settings or {}
     guild.players = guild.players or {}
@@ -158,12 +265,14 @@ local function migrateGuild(guild)
     guild.scans = guild.scans or {}
     guild.scans.history = guild.scans.history or {}
     guild.prompts = guild.prompts or {}
+    ensurePurgeState(guild)
     guild.messageQueue = guild.messageQueue or {}
     if type(guild.messageHistory) ~= "table" then
         guild.messageHistory = {}
     end
     ensureMessagesState(guild)
     ensureMessagingCampaignsState(guild)
+    ensureInviteState(guild)
 
     for key, player in pairs(guild.players) do
         player.key = player.key or key
@@ -261,6 +370,123 @@ function GC.Migrations:Run()
             root.settings.fontTheme = "wowDefault"
         end
         currentVersion = 9
+    end
+
+    if currentVersion < 10 then
+        for _, guild in pairs(root.guilds or {}) do
+            ensurePurgeState(guild)
+        end
+        currentVersion = 10
+    end
+
+    if currentVersion < 11 then
+        root.settings = root.settings or {}
+        if root.settings.enableInviteModule == nil then
+            root.settings.enableInviteModule = true
+        end
+        for _, guild in pairs(root.guilds or {}) do
+            ensureInviteState(guild)
+        end
+        currentVersion = 11
+    end
+
+    if currentVersion < 12 then
+        for _, guild in pairs(root.guilds or {}) do
+            ensureInviteState(guild)
+        end
+        currentVersion = 12
+    end
+
+    if currentVersion < 13 then
+        for _, guild in pairs(root.guilds or {}) do
+            ensureInviteState(guild)
+        end
+        currentVersion = 13
+    end
+
+    if currentVersion < 14 then
+        root.settings = root.settings or {}
+        -- The Invite tab is officer-gated by invite permissions and dry-run safety,
+        -- not by a hidden General setting. Older development builds seeded this as
+        -- false without exposing a UI control, which made the Invite page look disabled.
+        if root.settings.enableInviteModule == nil or root.settings.enableInviteModule == false then
+            root.settings.enableInviteModule = true
+        end
+        for _, guild in pairs(root.guilds or {}) do
+            ensureInviteState(guild)
+        end
+        currentVersion = 14
+    end
+
+    if currentVersion < 15 then
+        for _, guild in pairs(root.guilds or {}) do
+            ensureInviteState(guild)
+            guild.invite = guild.invite or {}
+            guild.invite.settings = guild.invite.settings or {}
+            local settings = guild.invite.settings
+            local maxLevel = (GetMaxPlayerLevel and tonumber(GetMaxPlayerLevel())) or 90
+
+            -- Timer-initiated WHO queries can return unreliable empty results in
+            -- Retail/Midnight testing. Use one explicit user click per band.
+            settings.autoAdvanceScan = false
+            settings.scanLevelBands = {
+                { min = 75, max = maxLevel },
+                { min = 50, max = 74 },
+                { min = 25, max = 49 },
+                { min = 1, max = 24 },
+            }
+            settings.scanLevelMin = 1
+            settings.scanLevelMax = maxLevel
+            settings.scanQueryMode = "level-band-local-realm"
+        end
+        currentVersion = 15
+    end
+
+    if currentVersion < 16 then
+        for _, guild in pairs(root.guilds or {}) do
+            ensureInviteState(guild)
+            guild.invite = guild.invite or {}
+            guild.invite.settings = guild.invite.settings or {}
+            local settings = guild.invite.settings
+            local maxLevel = (GetMaxPlayerLevel and tonumber(GetMaxPlayerLevel())) or 90
+
+            settings.scanQueryMode = "adaptive-level-range"
+            settings.scanLevelMin = 1
+            settings.scanLevelMax = maxLevel
+            settings.whoCapThreshold = tonumber(settings.whoCapThreshold) or 50
+            settings.maxSplitDepth = tonumber(settings.maxSplitDepth) or 6
+        end
+        currentVersion = 16
+    end
+
+    if currentVersion < 17 then
+        root.settings = root.settings or {}
+        if root.settings.inviteHotkey == nil then
+            root.settings.inviteHotkey = "CTRL-SHIFT-I"
+        end
+        if root.settings.inviteScanHotkey == nil then
+            root.settings.inviteScanHotkey = "CTRL-SHIFT-S"
+        end
+        currentVersion = 17
+    end
+
+    if currentVersion < 18 then
+        root.settings = root.settings or {}
+        if root.settings.enableWelcomeBatch == nil then
+            root.settings.enableWelcomeBatch = true
+        end
+        if root.settings.welcomeBatchWindowSeconds == nil then
+            root.settings.welcomeBatchWindowSeconds = 180
+        end
+        if root.settings.welcomeMessageTemplate == nil then
+            root.settings.welcomeMessageTemplate = "Welcome to the guild, {names}! Glad to have you aboard!"
+        end
+        for _, guild in pairs(root.guilds or {}) do
+            guild.welcomeBatch = guild.welcomeBatch or {}
+            guild.welcomeBatch.recentWelcomed = guild.welcomeBatch.recentWelcomed or {}
+            guild.welcomeBatch.lastSentAt = guild.welcomeBatch.lastSentAt or nil
+        end
+        currentVersion = 18
     end
 
     for _, guild in pairs(root.guilds or {}) do

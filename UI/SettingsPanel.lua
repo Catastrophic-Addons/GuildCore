@@ -53,7 +53,7 @@ local function makeToggle(parent, label, y, onChange)
     updateVisual()
 
     -- Label (right side)
-    local lbl = Th.Fs(row, "body", label, "textSecond")
+    local lbl = Th.Fs(row, "data", label, "textSecond")
     lbl:SetPoint("LEFT", btn, "RIGHT", 10, 0)
 
     btn:SetScript("OnClick", function()
@@ -81,7 +81,7 @@ local function makeNumInput(parent, label, y, minVal, maxVal)
     row:SetPoint("TOPLEFT",  parent, "TOPLEFT",  0, y)
     row:SetPoint("TOPRIGHT", parent, "TOPRIGHT", -P, y)
 
-    local lbl = Th.Fs(row, "body", label, "textSecond")
+    local lbl = Th.Fs(row, "data", label, "textSecond")
     lbl:SetPoint("LEFT", 0, 0)
     lbl:SetWidth(200)
 
@@ -98,6 +98,133 @@ local function makeNumInput(parent, label, y, minVal, maxVal)
     end
     local function setValue(v)
         box:SetText(v ~= nil and tostring(v) or "")
+    end
+
+    return row, getValue, setValue
+end
+
+local function makeTextInput(parent, label, y, width)
+    local Th = T()
+    local P  = Th.padding
+
+    local row = CreateFrame("Frame", nil, parent)
+    row:SetHeight(28)
+    row:SetPoint("TOPLEFT",  parent, "TOPLEFT",  0, y)
+    row:SetPoint("TOPRIGHT", parent, "TOPRIGHT", -P, y)
+
+    local lbl = Th.Fs(row, "data", label, "textSecond")
+    lbl:SetPoint("LEFT", 0, 0)
+    lbl:SetWidth(200)
+
+    local box = GC.UI.Panel.Input(row, width or 360, Th.inputH)
+    box:SetPoint("LEFT", 210, 0)
+
+    local function getValue()
+        return box:GetText() or ""
+    end
+    local function setValue(v)
+        box:SetText(v ~= nil and tostring(v) or "")
+    end
+
+    return row, getValue, setValue
+end
+
+local function keyFromInput(key)
+    if key == "UNKNOWN" then return nil end
+    if key == "LSHIFT" or key == "RSHIFT" or key == "LCTRL" or key == "RCTRL"
+        or key == "LALT" or key == "RALT" then
+        return nil
+    end
+
+    local parts = {}
+    if IsControlKeyDown and IsControlKeyDown() then parts[#parts + 1] = "CTRL" end
+    if IsAltKeyDown and IsAltKeyDown() then parts[#parts + 1] = "ALT" end
+    if IsShiftKeyDown and IsShiftKeyDown() then parts[#parts + 1] = "SHIFT" end
+    parts[#parts + 1] = key
+    return table.concat(parts, "-")
+end
+
+local function makeKeybind(parent, label, y, onChange)
+    local Th = T()
+    local P = Th.padding
+    local row = CreateFrame("Frame", nil, parent)
+    row:SetHeight(30)
+    row:SetPoint("TOPLEFT", parent, "TOPLEFT", 0, y)
+    row:SetPoint("TOPRIGHT", parent, "TOPRIGHT", -P, y)
+
+    local lbl = Th.Fs(row, "data", label, "textSecond")
+    lbl:SetPoint("LEFT", 0, 0)
+    lbl:SetWidth(200)
+
+    local btn = GC.UI.Button.Create(row, "Not Set", "secondary", 160, Th.btnH)
+    btn:SetPoint("LEFT", 210, 0)
+
+    local capture = CreateFrame("EditBox", nil, row)
+    capture:SetSize(1, 1)
+    capture:SetPoint("LEFT", btn, "RIGHT", 1, 0)
+    capture:SetAutoFocus(false)
+    capture:EnableKeyboard(false)
+    capture:SetAlpha(0)
+
+    local value = ""
+    local listening = false
+
+    local function setButtonText()
+        btn:SetLabel(listening and "Press keys..." or (value ~= "" and value or "Not Set"))
+    end
+
+    local function stopListening()
+        listening = false
+        capture:EnableKeyboard(false)
+        if capture.ClearFocus then
+            capture:ClearFocus()
+        end
+        if capture.SetPropagateKeyboardInput then
+            capture:SetPropagateKeyboardInput(true)
+        end
+        setButtonText()
+    end
+
+    btn:SetScript("OnClick", function()
+        listening = true
+        capture:EnableKeyboard(true)
+        if capture.SetPropagateKeyboardInput then
+            capture:SetPropagateKeyboardInput(false)
+        end
+        capture:SetFocus()
+        setButtonText()
+    end)
+
+    capture:SetScript("OnKeyDown", function(_, key)
+        if not listening then return end
+        if key == "ESCAPE" or key == "BACKSPACE" or key == "DELETE" then
+            value = ""
+            stopListening()
+            if onChange then onChange(value) end
+            return
+        end
+
+        local binding = keyFromInput(key)
+        if not binding then return end
+        value = binding
+        stopListening()
+        if onChange then onChange(value) end
+    end)
+    capture:SetScript("OnEditFocusLost", function()
+        if listening then
+            stopListening()
+        end
+    end)
+    capture:SetScript("OnTextChanged", function(self)
+        if self:GetText() ~= "" then
+            self:SetText("")
+        end
+    end)
+
+    local function getValue() return value end
+    local function setValue(v)
+        value = tostring(v or "")
+        setButtonText()
     end
 
     return row, getValue, setValue
@@ -130,14 +257,42 @@ local function makeDropdown(parent, label, y, width, options, onChange)
     local arrow = Th.Fs(btn, "small", "v", "textAccent")
     arrow:SetPoint("RIGHT", -8, 0)
 
-    local menu = CreateFrame("Frame", nil, btn)
-    menu:SetPoint("TOPLEFT", btn, "BOTTOMLEFT", 0, -2)
-    menu:SetPoint("TOPRIGHT", btn, "BOTTOMRIGHT", 0, -2)
-    menu:SetHeight(#options * Th.btnH)
-    menu:SetFrameStrata("DIALOG")
-    menu:SetFrameLevel((btn:GetFrameLevel() or 1) + 20)
+    local MAX_VISIBLE = 6
+    local itemH = Th.btnH
+    local visibleCount = math.min(#options, MAX_VISIBLE)
+    local menuW = width or 180
+
+    local menu = CreateFrame("Frame", nil, UIParent)
+    menu:SetSize(menuW, visibleCount * itemH)
+    menu:SetFrameStrata("TOOLTIP")
+    menu:SetFrameLevel(200)
     Th.Bg(menu, Th.c.panel, Th.c.borderAccent)
     menu:Hide()
+
+    local function repositionMenu()
+        local scale = UIParent:GetEffectiveScale() or 1
+        local bScale = btn:GetEffectiveScale() or 1
+        local bx, by = btn:GetLeft(), btn:GetBottom()
+        if not bx then return end
+        bx = bx * bScale / scale
+        by = by * bScale / scale
+        local menuH = visibleCount * itemH
+        local screenH = UIParent:GetHeight() or 768
+        menu:ClearAllPoints()
+        if (by - menuH) < 0 then
+            menu:SetPoint("BOTTOMLEFT", UIParent, "BOTTOMLEFT", bx, by + (btn:GetHeight() * bScale / scale) + 2)
+        else
+            menu:SetPoint("TOPLEFT", UIParent, "BOTTOMLEFT", bx, by - 2)
+        end
+        menu:SetWidth(btn:GetWidth() * bScale / scale)
+    end
+
+    local scrollChild = CreateFrame("Frame", nil, menu)
+    scrollChild:SetSize(menuW, #options * itemH)
+
+    local sf = CreateFrame("ScrollFrame", nil, menu)
+    sf:SetAllPoints(menu)
+    sf:SetScrollChild(scrollChild)
 
     local selectedKey
     local optionButtons = {}
@@ -156,11 +311,23 @@ local function makeDropdown(parent, label, y, width, options, onChange)
         end
     end
 
+    local function scrollToSelected()
+        if not selectedKey then return end
+        for i, optBtn in ipairs(optionButtons) do
+            if optBtn._key == selectedKey then
+                local offset = (i - 1) * itemH
+                local maxScroll = math.max(0, #options * itemH - visibleCount * itemH)
+                sf:SetVerticalScroll(math.min(offset, maxScroll))
+                return
+            end
+        end
+    end
+
     for index, option in ipairs(options) do
-        local optBtn = CreateFrame("Button", nil, menu)
-        optBtn:SetHeight(Th.btnH)
-        optBtn:SetPoint("TOPLEFT", menu, "TOPLEFT", 0, -((index - 1) * Th.btnH))
-        optBtn:SetPoint("TOPRIGHT", menu, "TOPRIGHT", 0, -((index - 1) * Th.btnH))
+        local optBtn = CreateFrame("Button", nil, scrollChild)
+        optBtn:SetHeight(itemH)
+        optBtn:SetPoint("TOPLEFT",  scrollChild, "TOPLEFT",  0, -((index - 1) * itemH))
+        optBtn:SetPoint("TOPRIGHT", scrollChild, "TOPRIGHT", 0, -((index - 1) * itemH))
         optBtn._key = option.key
 
         local bg = optBtn:CreateTexture(nil, "BACKGROUND")
@@ -196,7 +363,9 @@ local function makeDropdown(parent, label, y, width, options, onChange)
             menu:Hide()
             arrow:SetText("v")
         else
+            repositionMenu()
             refreshOptions()
+            scrollToSelected()
             menu:Show()
             arrow:SetText("^")
         end
@@ -287,7 +456,7 @@ function SP:Create(parent)
         self._getters[settingKey] = getV
         gap(30)
         if helpText then
-            local ht = Th.Fs(content, "small", helpText, "textDimmed")
+            local ht = Th.Fs(content, "data", helpText, "textDimmed")
             ht:SetPoint("TOPLEFT", content, "TOPLEFT", 50, y)
             ht:SetPoint("TOPRIGHT", content, "TOPRIGHT", -4, y)
             ht:SetWordWrap(true)
@@ -304,7 +473,7 @@ function SP:Create(parent)
         self._getters[settingKey] = getV
         gap(32)
         if helpText then
-            local ht = Th.Fs(content, "small", helpText, "textDimmed")
+            local ht = Th.Fs(content, "data", helpText, "textDimmed")
             ht:SetPoint("TOPLEFT", content, "TOPLEFT", 0, y)
             ht:SetPoint("TOPRIGHT", content, "TOPRIGHT", -4, y)
             ht:SetWordWrap(true)
@@ -322,6 +491,50 @@ function SP:Create(parent)
             DS():SetSetting(settingKey, v)
             GC.UI.MainFrame:SetStatus(label .. " saved.", "textSuccess")
         end)
+    end
+
+    local function addTextInput(settingKey, label, helpText, width)
+        local _, getV, setV = makeTextInput(content, label, y, width)
+        self._setters[settingKey] = setV
+        if not self._getters then self._getters = {} end
+        self._getters[settingKey] = getV
+        gap(32)
+        if helpText then
+            local ht = Th.Fs(content, "data", helpText, "textDimmed")
+            ht:SetPoint("TOPLEFT", content, "TOPLEFT", 0, y)
+            ht:SetPoint("TOPRIGHT", content, "TOPRIGHT", -4, y)
+            ht:SetWordWrap(true)
+            gap(18)
+        end
+        local saveBtn = GC.UI.Button.Create(content, "Save", "primary", 80, Th.btnH)
+        saveBtn:SetPoint("TOPLEFT", 0, y)
+        gap(Th.btnH + 4)
+        saveBtn:SetScript("OnClick", function()
+            local v = getV()
+            DS():SetSetting(settingKey, v or "")
+            GC.UI.MainFrame:SetStatus(label .. " saved.", "textSuccess")
+        end)
+    end
+
+    local function addKeybind(settingKey, label, helpText)
+        local _, getV, setV = makeKeybind(content, label, y, function(newVal)
+            DS():SetSetting(settingKey, newVal or "")
+            if GC.UI and GC.UI.ApplyInviteHotkeys then
+                GC.UI.ApplyInviteHotkeys()
+            end
+            GC.UI.MainFrame:SetStatus(label .. (newVal ~= "" and (" set to " .. newVal .. ".") or " cleared."), "textSuccess")
+        end)
+        self._setters[settingKey] = setV
+        if not self._getters then self._getters = {} end
+        self._getters[settingKey] = getV
+        gap(34)
+        if helpText then
+            local ht = Th.Fs(content, "data", helpText, "textDimmed")
+            ht:SetPoint("TOPLEFT", content, "TOPLEFT", 0, y)
+            ht:SetPoint("TOPRIGHT", content, "TOPRIGHT", -4, y)
+            ht:SetWordWrap(true)
+            gap(18)
+        end
     end
 
     -- ── GENERAL ──────────────────────────────────
@@ -370,25 +583,25 @@ function SP:Create(parent)
         local preview = CreateFrame("Frame", nil, content)
         preview:SetPoint("TOPLEFT", content, "TOPLEFT", 0, y)
         preview:SetPoint("TOPRIGHT", content, "TOPRIGHT", 0, y)
-        preview:SetHeight(156)
+        preview:SetHeight(206)
         Th.Bg(preview, Th.c.panelAlt, Th.c.border)
         local previewRows = {
-            {"title", "Title Text"},
-            {"header", "Header Text"},
-            {"subheader", "Subheader Text"},
-            {"body", "Body text shows normal reading density."},
-            {"label", "Label Text"},
-            {"small", "Small text"},
-            {"tiny", "Tiny text"},
-            {"status", "Status text"},
+            {"title", "Title Text", 34},
+            {"header", "Header Text", 26},
+            {"subheader", "Subheader Text", 24},
+            {"body", "Body text shows normal reading density.", 22},
+            {"label", "Label Text", 22},
+            {"small", "Small text", 20},
+            {"tiny", "Tiny text", 19},
+            {"status", "Status text", 20},
         }
-        local py = -10
+        local py = -14
         for _, row in ipairs(previewRows) do
             local fs = Th.Fs(preview, row[1], row[2], row[1] == "status" and "textWarn" or "textSecond")
             fs:SetPoint("TOPLEFT", preview, "TOPLEFT", 14, py)
-            py = py - 18
+            py = py - row[3]
         end
-        gap(166)
+        gap(216)
     end
 
     -- ── GENERAL ──────────────────────────────────
@@ -396,6 +609,27 @@ function SP:Create(parent)
     addToggle("debugMode",
         "Debug mode",
         "Enables verbose chat output and debug-only UI overlays. Disable during normal gameplay.")
+
+    secHdr("Invite Hotkeys")
+    addKeybind("inviteHotkey",
+        "Invite Next hotkey",
+        "Click the field, then press the desired key combination. Escape, Backspace, or Delete clears it.")
+    addKeybind("inviteScanHotkey",
+        "Invite Scan hotkey",
+        "Runs the Invite tab scan action from a user key press.")
+
+    secHdr("Welcome Messages")
+    addToggle("enableWelcomeBatch",
+        "Batched guild welcome messages",
+        "Collects new guild joins and sends one guild chat welcome after the batch window.")
+    addNumInput("welcomeBatchWindowSeconds",
+        "Batch window seconds",
+        "How long to collect new joins before sending one welcome message. Minimum is 15 seconds.",
+        15)
+    addTextInput("welcomeMessageTemplate",
+        "Welcome template",
+        "Use {names} where the formatted new member names should appear.",
+        390)
 
     -- ── ROSTER ───────────────────────────────────
     secHdr("Roster")
@@ -467,6 +701,9 @@ function SP:Create(parent)
                 if GC.UI.MainFrame and GC.UI.MainFrame.ApplyTheme then
                     GC.UI.MainFrame:ApplyTheme()
                 end
+            end
+            if GC.UI and GC.UI.ApplyInviteHotkeys then
+                GC.UI.ApplyInviteHotkeys()
             end
         end
         SP:Refresh()

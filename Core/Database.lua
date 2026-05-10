@@ -48,6 +48,19 @@ function GC.DB:GetGuild()
         sync = {},
         scans = { history = {} },
         prompts = {},
+        purge = {
+            queue = {},
+            candidates = {},
+            protected = {},
+            log = {},
+            meta = {
+                daysOffline = 30,
+                safeTags = { "PROTECTED", "LEAVE", "OFFICER ALT", "DO NOT KICK" },
+                includeRanks = { "Initiate", "Member" },
+                includeAllRanks = true,
+                exemptLinkedCharacters = true,
+            },
+        },
         messageQueue = {},
         messageHistory = {},
         messagingCampaigns = {
@@ -76,6 +89,11 @@ function GC.DB:GetGuild()
             categoryOrder = {},
             messages = {},
             messageOrderByCategory = {},
+        },
+        invite = GC.Utils.DeepCopy(ns.Defaults.invite),
+        welcomeBatch = {
+            recentWelcomed = {},
+            lastSentAt = nil,
         },
     }
 

@@ -2,8 +2,9 @@
 ## Title: Guild Core
 ## Notes: Modern guild management suite for World of Warcraft (Retail).
 ## Author: Catastrophie
-## Version: 0.4.0
+## Version: 1.5.9
 ## SavedVariables: GuildCoreDB
+## IconTexture: Interface/AddOns/GuildCore/Assets/icons/GC_Gold
 
 Data\Defaults.lua
 
@@ -31,10 +32,27 @@ Modules\Points\Service.lua
 Modules\Messages\Module.lua
 Modules\Messages\Chunker.lua
 Modules\Messages\Placeholders.lua
+Modules\Messages\Storage.lua
+Modules\Messages\History.lua
+Modules\Messages\Categories.lua
+Modules\Messages\Templates.lua
+Modules\Messages\Queue.lua
+Modules\Messages\Automation.lua
 Modules\Messages\Service.lua
 Modules\Messages\TemplateBridge.lua
+Modules\Purge\Service.lua
 Modules\Operations\Service.lua
+Modules\Operations\MacroBuilder.lua
 Modules\Sync\Service.lua
+Modules\Invite\Module.lua
+Modules\Invite\Service.lua
+Modules\Invite\Filters.lua
+Modules\Invite\Realm.lua
+Modules\Invite\Scanner.lua
+Modules\Invite\History.lua
+Modules\Invite\Queue.lua
+Modules\Invite\Probe.lua
+Modules\WelcomeBatch\Service.lua
 
 UI\Theme.lua
 UI\Layering.lua
@@ -46,10 +64,12 @@ UI\MainFrame.lua
 UI\MinimapButton.lua
 UI\CommunityTab.lua
 UI\Dashboard.lua
+UI\PurgePanel.lua
 UI\RosterPanel.lua
 UI\PlayerPanel.lua
 UI\LogPanel.lua
 UI\MessagingPanel.lua
+UI\InvitePanel.lua
 UI\SettingsPanel.lua
 
 GuildCore.lua

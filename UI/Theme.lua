@@ -15,11 +15,11 @@ T.navWidth     = 148
 T.detailWidth  = 280
 T.titleBarH    = 48
 T.statusBarH   = 28
-T.colBarH      = 24
+T.colBarH      = 28
 T.padding      = 12
-T.rowH         = 28
-T.btnH         = 26
-T.inputH       = 24
+T.rowH         = 32
+T.btnH         = 30
+T.inputH       = 28
 T.sectionGap   = 10
 
 -- Color palette (arrays: {r, g, b, a})
@@ -90,6 +90,8 @@ T.fontThemes = {
         body      = {"Fonts\\ARIALN.TTF",   13, ""},
         label     = {"Fonts\\ARIALN.TTF",   13, ""},
         input     = {"Fonts\\ARIALN.TTF",   13, ""},
+        data      = {"Fonts\\ARIALN.TTF",   12, ""},
+        dataLarge = {"Fonts\\ARIALN.TTF",   17, ""},
         small     = {"Fonts\\ARIALN.TTF",   12, ""},
         tiny      = {"Fonts\\ARIALN.TTF",   11, ""},
         status    = {"Fonts\\ARIALN.TTF",   12, "OUTLINE"},
@@ -102,6 +104,8 @@ T.fontThemes = {
         body      = {addonFont("MagentaReguler.ttf"), 13, ""},
         label     = {addonFont("MagentaReguler.ttf"), 13, ""},
         input     = {addonFont("MagentaReguler.ttf"), 13, ""},
+        data      = {"Fonts\\ARIALN.TTF",              12, ""},
+        dataLarge = {"Fonts\\ARIALN.TTF",              17, ""},
         small     = {addonFont("MagentaReguler.ttf"), 12, ""},
         tiny      = {addonFont("MagentaReguler.ttf"), 11, ""},
         status    = {addonFont("MagentaBold.ttf"),    12, "OUTLINE"},
@@ -114,37 +118,15 @@ T.fontThemes = {
         body      = {addonFont("FrescitoRegular.ttf"), 13, ""},
         label     = {addonFont("FrescitoRegular.ttf"), 13, ""},
         input     = {"Fonts\\ARIALN.TTF",              13, ""},
-        small     = {addonFont("FrescitoRegular.ttf"), 12, ""},
+        data      = {"Fonts\\ARIALN.TTF",              12, ""},
+        dataLarge = {"Fonts\\ARIALN.TTF",              17, ""},
+        small     = {"Fonts\\ARIALN.TTF",              12, ""},  -- ARIALN: digits in row data render safely
         tiny      = {addonFont("FrescitoRegular.ttf"), 11, ""},
         status    = {addonFont("FrescitoBold.ttf"),    12, "OUTLINE"},
     },
-    solemn = {
-        title     = {addonFont("SolemnSojourn.ttf"),   26, ""},
-        header    = {addonFont("MagentaBold.ttf"),     17, ""},
-        subheader = {addonFont("MagentaReguler.ttf"),  15, ""},
-        nav       = {addonFont("MagentaReguler.ttf"),  14, ""},
-        body      = {addonFont("MagentaReguler.ttf"),  13, ""},
-        label     = {addonFont("MagentaReguler.ttf"),  13, ""},
-        input     = {addonFont("MagentaReguler.ttf"),  13, ""},
-        small     = {addonFont("MagentaReguler.ttf"),  12, ""},
-        tiny      = {addonFont("MagentaReguler.ttf"),  11, ""},
-        status    = {addonFont("MagentaBold.ttf"),     12, "OUTLINE"},
-    },
-    exalted = {
-        title     = {addonFont("ExaltedDemo.ttf"),     26, ""},
-        header    = {addonFont("MagentaBold.ttf"),     17, ""},
-        subheader = {addonFont("MagentaReguler.ttf"),  15, ""},
-        nav       = {addonFont("MagentaReguler.ttf"),  14, ""},
-        body      = {addonFont("MagentaReguler.ttf"),  13, ""},
-        label     = {addonFont("MagentaReguler.ttf"),  13, ""},
-        input     = {addonFont("MagentaReguler.ttf"),  13, ""},
-        small     = {addonFont("MagentaReguler.ttf"),  12, ""},
-        tiny      = {addonFont("MagentaReguler.ttf"),  11, ""},
-        status    = {addonFont("MagentaBold.ttf"),     12, "OUTLINE"},
-    },
 }
 
-local FONT_THEME_ORDER = {"wowDefault", "magenta", "frescito", "solemn", "exalted"}
+local FONT_THEME_ORDER = {"wowDefault", "magenta", "frescito"}
 T.f = T.fontThemes.wowDefault
 
 -- Class colors for roster display

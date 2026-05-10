@@ -50,13 +50,13 @@ local FILTER_CATS = {
 local function buildLogRow(row, item)
     local Th = T()
     if not row._built then
-        local timeFs   = Th.Fs(row, "small", "", "textDimmed")
+        local timeFs   = Th.Fs(row, "data", "", "textDimmed")
         timeFs:SetPoint("LEFT", 6, 0); timeFs:SetWidth(104)
         local typeFs   = Th.Fs(row, "small", "", "textAccent")
         typeFs:SetPoint("LEFT", 114, 0); typeFs:SetWidth(90)
         local playerFs = Th.Fs(row, "small", "", "textSecond")
         playerFs:SetPoint("LEFT", 208, 0); playerFs:SetWidth(120)
-        local detailFs = Th.Fs(row, "small", "", "textDimmed")
+        local detailFs = Th.Fs(row, "data", "", "textDimmed")
         detailFs:SetPoint("LEFT", 332, 0); detailFs:SetPoint("RIGHT", -6, 0)
         row._timeFs = timeFs; row._typeFs = typeFs
         row._playerFs = playerFs; row._detailFs = detailFs
@@ -94,7 +94,7 @@ function LP:Create(parent)
     -- ── Header ───────────────────────────────────
     local hdr = Th.Fs(frame, "header", "Activity Log", "textPrimary")
     hdr:SetPoint("TOPLEFT", P, -P)
-    local countFs = Th.Fs(frame, "small", "", "textDimmed")
+    local countFs = Th.Fs(frame, "data", "", "textDimmed")
     countFs:SetPoint("LEFT", hdr, "RIGHT", 10, -2)
     self.countLabel = countFs
 
@@ -164,7 +164,7 @@ function LP:Create(parent)
     Th.Bg(colBar, Th.c.chrome)
     local function colHdr(lbl, x, w)
         local fs = Th.Fs(colBar, "tiny", lbl, "textDimmed")
-        fs:SetPoint("LEFT", x + 4, 0); fs:SetWidth(w)
+        fs:SetPoint("LEFT", x, 0); fs:SetWidth(w)
     end
     colHdr("Time",   6,   104)
     colHdr("Event",  114, 90)

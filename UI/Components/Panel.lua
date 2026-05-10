@@ -71,7 +71,7 @@ function Panel.Input(parent, w, h)
     local eb = CreateFrame("EditBox", nil, parent)
     eb:SetSize(w, h)
     eb:SetAutoFocus(false)
-    eb:SetFontObject("ChatFontNormal")
+    eb:SetTextInsets(6, 6, 0, 0) -- 6 px L/R breathing room inside the 1-px border
 
     Th.ApplyFont(eb, "input")
     if Th.RegisterRefresh then
@@ -136,7 +136,7 @@ function Panel.StatTile(parent, label, value)
     local a = Th.c.accent
     stripe:SetColorTexture(a[1], a[2], a[3], 0.7)
 
-    local numFs = Th.Fs(f, "title", tostring(value or 0), "textPrimary")
+    local numFs = Th.Fs(f, "dataLarge", tostring(value or 0), "textPrimary")
     numFs:SetPoint("CENTER", 0, 8)
     numFs:SetJustifyH("CENTER")
 
