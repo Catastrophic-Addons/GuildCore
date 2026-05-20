@@ -32,6 +32,10 @@ function RosterService:RunScan(reason)
 
     GC.Modules.RosterDiff:StoreSnapshot(snapshot)
 
+    if GC.Services and GC.Services.GuildService and GC.Services.GuildService.InvalidateRosterCache then
+        GC.Services.GuildService:InvalidateRosterCache()
+    end
+
     if scanSummary then
         GC:Debug(string.format(
             "Scan %s: tracked=%d online=%d excluded=%d changes=%d pendingPrompts=%d%s",

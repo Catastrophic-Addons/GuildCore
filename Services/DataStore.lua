@@ -33,6 +33,9 @@ function DS:SavePlayer(key, fields)
         if v ~= nil then p[k] = v end
     end
     db.players[key] = p
+    if GC.Services and GC.Services.GuildService and GC.Services.GuildService.InvalidateRosterCache then
+        GC.Services.GuildService:InvalidateRosterCache()
+    end
 end
 
 -- Return the addon log array for the current guild.

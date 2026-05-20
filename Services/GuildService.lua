@@ -8,6 +8,21 @@ GC.Services              = GC.Services or {}
 GC.Services.GuildService = {}
 local GS                 = GC.Services.GuildService
 
+local _rosterListCache    = nil
+local _rosterDataVersion  = 0
+local _rosterCacheVersion = -1
+
+function GS:InvalidateRosterCache()
+    _rosterDataVersion = _rosterDataVersion + 1
+    if GC.AltMain and GC.AltMain.InvalidateGroupCache then
+        GC.AltMain:InvalidateGroupCache()
+    end
+end
+
+function GS:GetRosterCacheVersion()
+    return _rosterCacheVersion, _rosterDataVersion
+end
+
 local function getActivePlayers()
     local players = GC.Services.DataStore:GetPlayers()
     if not players then
@@ -94,9 +109,18 @@ local function countsForDiscordDashboard(player)
     return true
 end
 
+local _CLASSIFICATION_LABEL = {main = "Main",    alt = "Alt",  unknown = "Unknown"}
+local _CLASSIFICATION_BADGE = {main = "[M]",     alt = "[A]",  unknown = "[?]"}
+
 -- Return sorted player list with derived display fields.
 -- Each entry adds: statusLabel, classColor, joinedDisplay, lastSeenDisplay
+-- Results are cached and only rebuilt when InvalidateRosterCache() has been
+-- called since the last build (e.g. after a scan or a manual player save).
 function GS:GetRosterList()
+    if _rosterListCache and _rosterCacheVersion == _rosterDataVersion then
+        return _rosterListCache
+    end
+
     local DS      = GC.Services.DataStore
     local players = DS:GetPlayers()
     if not players then return {} end
@@ -147,16 +171,8 @@ function GS:GetRosterList()
             -- Rank display (shorten long names)
             entry.rankShort = p.rankName and (p.rankName:sub(1, 14)) or "—"
             entry.classification = p.classification or "unknown"
-            entry.classificationLabel = ({
-                main = "Main",
-                alt = "Alt",
-                unknown = "Unknown",
-            })[entry.classification] or "Unknown"
-            entry.classificationBadge = ({
-                main = "[M]",
-                alt = "[A]",
-                unknown = "[?]",
-            })[entry.classification] or "[?]"
+            entry.classificationLabel = _CLASSIFICATION_LABEL[entry.classification] or "Unknown"
+            entry.classificationBadge = _CLASSIFICATION_BADGE[entry.classification] or "[?]"
             entry.mainDisplay = p.main and p.main:match("^([^%-]+)") or "—"
             entry.discordVerified = p.officerData and p.officerData.discordVerified or nil
             entry.discordName = p.officerData and p.officerData.discordName or nil
@@ -183,6 +199,8 @@ function GS:GetRosterList()
         return false
     end)
 
+    _rosterListCache    = list
+    _rosterCacheVersion = _rosterDataVersion
     return list
 end
 

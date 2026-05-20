@@ -37,6 +37,11 @@ local function createStyledButton(parent, label, bType, w, h, template)
     local cn   = T.c[normalKey]
 
     local btn = CreateFrame("Button", nil, parent, template)
+    if GC.Perf then
+        GC.Perf:CountUI("buttons", 1)
+        GC.Perf:CountUI("textures", 4)
+        GC.Perf:CountUI("fontStrings", 1)
+    end
     btn:SetSize(w, h)
 
     -- Background texture (exposed as btn._bg for external active-state control)

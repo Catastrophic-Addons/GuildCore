@@ -251,6 +251,46 @@ local function ensureInviteState(guild)
     end
 end
 
+local function ensureBanBookState(root)
+    if type(root.banBook) ~= "table" then
+        root.banBook = {}
+    end
+end
+
+local function ensureDashboardState(root)
+    root.settings = type(root.settings) == "table" and root.settings or {}
+    root.settings.dashboard = type(root.settings.dashboard) == "table" and root.settings.dashboard or {}
+    local dashboard = root.settings.dashboard
+    if dashboard.compactMode == nil then dashboard.compactMode = false end
+    if dashboard.showHealth == nil then dashboard.showHealth = true end
+    if dashboard.showTrends == nil then dashboard.showTrends = true end
+    if dashboard.showIcons == nil then dashboard.showIcons = true end
+    if dashboard.showQuickActions == nil then dashboard.showQuickActions = true end
+    dashboard.hiddenCards = type(dashboard.hiddenCards) == "table" and dashboard.hiddenCards or {}
+    dashboard.snapshotThrottleSeconds = tonumber(dashboard.snapshotThrottleSeconds) or 900
+    root.dashboardSnapshots = type(root.dashboardSnapshots) == "table" and root.dashboardSnapshots or {}
+end
+
+local function ensureSyncSettings(root)
+    root.settings = type(root.settings) == "table" and root.settings or {}
+    root.settings.sync = type(root.settings.sync) == "table" and root.settings.sync or {}
+    local sync = root.settings.sync
+    if sync.enabled == nil then sync.enabled = root.settings.enableSyncModule == true end
+    if sync.autoOnLogin == nil then sync.autoOnLogin = false end
+    if sync.autoOnPeerDetected == nil then sync.autoOnPeerDetected = false end
+    if sync.showMessages == nil then sync.showMessages = true end
+    if sync.debug == nil then sync.debug = false end
+end
+
+local function ensureRosterSettings(root)
+    root.settings = type(root.settings) == "table" and root.settings or {}
+    root.settings.roster = type(root.settings.roster) == "table" and root.settings.roster or {}
+    local roster = root.settings.roster
+    if roster.onlineOnly == nil then roster.onlineOnly = false end
+    if roster.groupAlts == nil then roster.groupAlts = false end
+    if roster.lastLetterFilter == "" then roster.lastLetterFilter = nil end
+end
+
 local function migrateGuild(guild)
     guild.settings = guild.settings or {}
     guild.players = guild.players or {}
@@ -306,6 +346,10 @@ end
 function GC.Migrations:Run()
     local root = GC.DB:GetRoot()
     local currentVersion = root.meta.dbVersion or 1
+    ensureBanBookState(root)
+    ensureDashboardState(root)
+    ensureSyncSettings(root)
+    ensureRosterSettings(root)
 
     if currentVersion < 2 then
         root.settings = root.settings or {}
@@ -489,9 +533,30 @@ function GC.Migrations:Run()
         currentVersion = 18
     end
 
+    if currentVersion < 19 then
+        ensureBanBookState(root)
+        currentVersion = 19
+    end
+
+    if currentVersion < 20 then
+        ensureDashboardState(root)
+        ensureSyncSettings(root)
+        currentVersion = 20
+    end
+
+    if currentVersion < 21 then
+        ensureSyncSettings(root)
+        ensureRosterSettings(root)
+        currentVersion = 21
+    end
+
     for _, guild in pairs(root.guilds or {}) do
         migrateGuild(guild)
     end
+    ensureBanBookState(root)
+    ensureDashboardState(root)
+    ensureSyncSettings(root)
+    ensureRosterSettings(root)
 
     root.meta.dbVersion = currentVersion
 end

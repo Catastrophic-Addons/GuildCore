@@ -503,6 +503,10 @@ function T:RegisterRefresh(callback)
     end
 end
 
+function T:GetRefreshCallbackCount()
+    return #refreshCallbacks
+end
+
 function T:RefreshRegistered()
     for _, item in ipairs(themedTextures) do
         applyTextureColor(item.texture, item.colorKey, item.alpha)
@@ -566,6 +570,7 @@ end
 
 -- Apply solid color background to a frame. border (optional) draws 1px edges.
 function T.Bg(frame, c, border)
+    if GC.Perf then GC.Perf:CountUI("textures", border and 5 or 1) end
     local bgKey = colorKeyFor(c)
     local borderKey = colorKeyFor(border)
     local bg = frame:CreateTexture(nil, "BACKGROUND", nil, -8)
@@ -592,6 +597,7 @@ end
 
 -- Create a 1px horizontal separator line inside a parent frame
 function T.HSep(parent, yOffset, alpha)
+    if GC.Perf then GC.Perf:CountUI("textures", 1) end
     local line = parent:CreateTexture(nil, "ARTWORK")
     local sc = T.c.separator
     line:SetColorTexture(sc[1], sc[2], sc[3], alpha or sc[4])
@@ -604,6 +610,7 @@ end
 
 -- Create a FontString using the theme font registry
 function T.Fs(parent, fontKey, text, colorKey)
+    if GC.Perf then GC.Perf:CountUI("fontStrings", 1) end
     local c  = colorKey and T.c[colorKey] or T.c.textPrimary
     local fs = parent:CreateFontString(nil, "OVERLAY")
     T.ApplyFont(fs, fontKey)

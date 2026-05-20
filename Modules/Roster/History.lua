@@ -43,6 +43,7 @@ local function ensurePlayerRecord(member)
             class        = member.classFileName,     -- canonical: uppercase e.g. "WARRIOR"
             classDisplayName = member.classDisplayName,
             classFileName    = member.classFileName,
+            guid             = member.guid,
             firstSeenAt      = member.capturedAt,
             joinedAt         = member.officerData and member.officerData.joinDate or nil,
             joinedAtSource   = member.officerData and member.officerData.joinDate and "officerNote" or nil,
@@ -129,6 +130,7 @@ local function updateMemberRecord(record, member, reason)
     record.class            = member.classFileName
     record.classDisplayName = member.classDisplayName
     record.classFileName    = member.classFileName
+    record.guid             = member.guid or record.guid
     record.zone             = member.zone
     record.publicNote       = member.publicNote
     record.officerNote      = member.officerNote

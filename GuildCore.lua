@@ -189,6 +189,61 @@ SlashCmdList["GUILDCORE"] = function(msg)
         return
     end
 
+    if msg == "perf" then
+        if GC.Perf and GC.Perf.PrintPerfSummary then
+            GC.Perf:PrintPerfSummary()
+        else
+            print("|cff4fd1c5Guild Core:|r Perf diagnostics are unavailable.")
+        end
+        return
+    end
+
+    if msg == "rosterdump" then
+        if GC.Perf and GC.Perf.PrintRosterDump then
+            GC.Perf:PrintRosterDump()
+        else
+            print("|cff4fd1c5Guild Core:|r Roster dump unavailable.")
+        end
+        return
+    end
+
+    if msg == "mem" or msg == "memory" then
+        if GC.Perf and GC.Perf.PrintDBSizes then
+            GC.Perf:PrintDBSizes()
+        else
+            print("|cff4fd1c5Guild Core:|r Memory diagnostics are unavailable.")
+        end
+        return
+    end
+
+    if msg == "uiobjects" or msg == "ui objects" then
+        if GC.Perf and GC.Perf.PrintUIObjects then
+            GC.Perf:PrintUIObjects()
+        else
+            print("|cff4fd1c5Guild Core:|r UI object diagnostics are unavailable.")
+        end
+        return
+    end
+
+    if msg == "gc" then
+        if collectgarbage then
+            local before = collectgarbage("count")
+            collectgarbage("collect")
+            local after = collectgarbage("count")
+            print(string.format("|cff4fd1c5Guild Core:|r Garbage collection complete: %.1f KB -> %.1f KB.", before, after))
+        end
+        return
+    end
+
+    if msg == "sync" or msg == "sync now" then
+        if GC.Sync and GC.Sync.SyncNow then
+            GC.Sync:SyncNow("slash")
+        else
+            print("|cff4fd1c5Guild Core:|r Sync service is unavailable.")
+        end
+        return
+    end
+
     if msg == "macrodebug" then
         local index = GetMacroIndexByName and GetMacroIndexByName("GuildCore_Action")
         print(index)
@@ -393,11 +448,13 @@ SlashCmdList["GUILDCORE"] = function(msg)
         return
     end
 
-    -- Panel shortcuts: /gc roster, /gc purge, /gc log, /gc settings, /gc messages
+    -- Panel shortcuts: /gc roster, /gc purge, /gc banbook, /gc log, /gc settings, /gc messages
     local panelMap = {
         roster = "roster",
         purge = "purge",
         invite = "invite",
+        banbook = "banbook",
+        ban = "banbook",
         log = "log",
         settings = "settings",
         dashboard = "dashboard",

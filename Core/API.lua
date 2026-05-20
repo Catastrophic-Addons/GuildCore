@@ -71,6 +71,16 @@ function API.GuildInvite(name)
         return false, "No player name supplied."
     end
 
+    -- Ban Book is the final shared guard for every current and future guild
+    -- invite path routed through Guild Core.
+    if GC.BanBook and GC.BanBook.InviteBlockMessage then
+        local message, entry = GC.BanBook:InviteBlockMessage(name)
+        if message then
+            GC:InviteDebug("warn", "Skipped banned character:", tostring(entry and entry.key or name))
+            return false, message
+        end
+    end
+
     local fn = C_GuildInfo and C_GuildInfo.Invite or GuildInvite
     if not fn then
         return false, "No guild invite API is available."
@@ -183,7 +193,8 @@ function API.GetGuildRosterInfo(index)
                 info.yearsOffline or info.offlineYears,
                 info.monthsOffline or info.offlineMonths,
                 info.daysOffline or info.offlineDays,
-                info.hoursOffline or info.offlineHours
+                info.hoursOffline or info.offlineHours,
+                info.guid or info.GUID or info.playerGUID or info.memberGUID or info.guildMemberGUID or info.clubMemberGUID
         end
         return info
     end
@@ -255,6 +266,118 @@ function API.SetGuildRosterShowOffline(showOffline)
     if SetGuildRosterShowOffline then
         return SetGuildRosterShowOffline(showOffline)
     end
+end
+
+local function normalizeNameForRosterLookup(name)
+    if not name or name == "" then
+        return nil
+    end
+    local shortName = tostring(name):match("^([^%-]+)") or tostring(name)
+    return shortName:lower()
+end
+
+local function extractRosterGuid(info)
+    if type(info) ~= "table" then
+        return nil
+    end
+
+    return info.guid
+        or info.GUID
+        or info.playerGUID
+        or info.memberGUID
+        or info.guildMemberGUID
+        or info.clubMemberGUID
+end
+
+function API.FindGuildRosterIndex(name)
+    if not GetNumGuildMembers then
+        return nil
+    end
+    local target = normalizeNameForRosterLookup(name)
+    if not target then
+        return nil
+    end
+    for index = 1, GetNumGuildMembers() do
+        local fullName
+        if C_GuildInfo and C_GuildInfo.GetGuildRosterInfo then
+            local info = C_GuildInfo.GetGuildRosterInfo(index)
+            fullName = type(info) == "table" and info.name or nil
+        end
+        if (not fullName or fullName == "") and GetGuildRosterInfo then
+            fullName = GetGuildRosterInfo(index)
+        end
+        if normalizeNameForRosterLookup(fullName) == target then
+            return index
+        end
+    end
+    return nil
+end
+
+function API.FindGuildRosterGuid(name)
+    if not GetNumGuildMembers then
+        return nil
+    end
+    local target = normalizeNameForRosterLookup(name)
+    if not target then
+        return nil
+    end
+
+    for index = 1, GetNumGuildMembers() do
+        if C_GuildInfo and C_GuildInfo.GetGuildRosterInfo then
+            local info = C_GuildInfo.GetGuildRosterInfo(index)
+            if type(info) == "table" and normalizeNameForRosterLookup(info.name) == target then
+                local guid = extractRosterGuid(info)
+                if guid and guid ~= "" then
+                    return guid
+                end
+            end
+        end
+
+        if GetGuildRosterInfo then
+            local fullName = GetGuildRosterInfo(index)
+            if normalizeNameForRosterLookup(fullName) == target then
+                local guid = select(17, GetGuildRosterInfo(index))
+                if guid and guid ~= "" then
+                    return guid
+                end
+            end
+        end
+    end
+    return nil
+end
+
+function API.SetGuildMemberNote(name, note, officer)
+    local index = API.FindGuildRosterIndex(name)
+    if not index then
+        return false, "Guild roster entry was not found."
+    end
+    note = tostring(note or "")
+
+    local missingModernGuid = false
+    if C_GuildInfo and C_GuildInfo.SetNote then
+        local guid = API.FindGuildRosterGuid(name)
+        if guid then
+            local ok, err = pcall(C_GuildInfo.SetNote, guid, note, officer ~= true)
+            if ok then
+                return true
+            end
+            return false, tostring(err)
+        end
+        missingModernGuid = true
+    end
+
+    local fn = officer and GuildRosterSetOfficerNote or GuildRosterSetPublicNote
+    if fn then
+        local ok, err = pcall(fn, index, note)
+        if ok then return true end
+        return false, tostring(err)
+    end
+
+    if missingModernGuid then
+        return false, "Guild roster GUID was unavailable. Refresh the roster and try again."
+    end
+
+    return false, officer and "Officer note API is unavailable." or "Public note API is unavailable."
 end
 
 function API.GetItemInfo(item)

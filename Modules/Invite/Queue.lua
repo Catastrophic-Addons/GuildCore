@@ -36,6 +36,9 @@ local DELAY_MIN     = 3
 local DELAY_MAX     = 30
 local DELAY_DEFAULT = 3
 local LIST_LIMIT    = 10
+local markVisibleCandidate
+local sessionStats
+local refreshInvitePanel
 
 -- ── Helpers ────────────────────────────────────────────────────────────────
 
@@ -84,6 +87,31 @@ local function rejectionReasons(candidate)
         return ""
     end
     return table.concat(candidate.ineligibleReasons, ",")
+end
+
+local function bannedEntryFor(candidate)
+    if not (candidate and GC.BanBook and GC.BanBook.IsBanned) then
+        return nil
+    end
+    local banned, entry = GC.BanBook:IsBanned(candidate.fullName or candidate.name or candidate.key, candidate.realm)
+    return banned and entry or nil
+end
+
+local function markBannedSkipped(candidate)
+    local entry = bannedEntryFor(candidate)
+    if not entry then
+        return false
+    end
+    if candidate then
+        candidate.status = "skipped"
+        candidate.result = "banned"
+        candidate.processedAt = now()
+        markVisibleCandidate(candidate, "skipped", "banned")
+    end
+    sessionStats().skipped = (sessionStats().skipped or 0) + 1
+    warnLine("Skipped banned character:", tostring(entry.key or (candidate and (candidate.fullName or candidate.name or candidate.key))))
+    refreshInvitePanel()
+    return true, entry
 end
 
 local function hasGuild(candidate)
@@ -149,7 +177,7 @@ local function selectedEligibleCandidates(candidates)
     }
 end
 
-local function sessionStats()
+sessionStats = function()
     local rt = runtime()
     rt.sessionStats = rt.sessionStats or {
         mode = "dry",
@@ -188,8 +216,6 @@ local function countQueuedItems()
     return count
 end
 
-local markVisibleCandidate
-
 local function markRemainingSkipped(reason)
     for _, item in ipairs(runtime().queue or {}) do
         if item.status == "queued" or item.status == "sending" then
@@ -215,7 +241,7 @@ markVisibleCandidate = function(item, status, result)
     end
 end
 
-local function refreshInvitePanel()
+refreshInvitePanel = function()
     local panel = GC.UI and GC.UI.InvitePanel
     if panel and panel.Refresh then
         panel:Refresh()
@@ -302,6 +328,18 @@ function Queue:AddCandidate(candidate)
         return false, "ineligible"
     end
 
+    if bannedEntryFor(candidate) then
+        if candidate then
+            candidate.eligible = false
+            candidate.selected = false
+            candidate.status = "skipped"
+            candidate.result = "banned"
+            markVisibleCandidate(candidate, "skipped", "banned")
+        end
+        warnLine("Skipped banned character:", tostring(candidate.fullName or candidate.name or candidate.key))
+        return false, "banned"
+    end
+
     if hasGuild(candidate) then
         printLine(string.format(
             "Invite queue rejected guilded candidate: %s guild=%s",
@@ -365,7 +403,7 @@ function Queue:AddCandidates(candidates)
         elseif err == "duplicate" then
             duplicates = duplicates + 1
             GC:InviteDebug("debug", "Invite queue skipped duplicate:", tostring(candidate and candidate.key))
-        elseif err == "ineligible" then
+        elseif err == "ineligible" or err == "banned" then
             ineligible = ineligible + 1
             GC:InviteDebug("debug", 
                 "Invite queue skipped ineligible:",
@@ -502,6 +540,21 @@ function Queue:InviteNow(candidate)
     local canInvite, reason = GC.Permissions:CanInviteGuild()
     if not canInvite then
         return false, reason or "Guild invite permission is unavailable."
+    end
+
+    local banned = bannedEntryFor(candidate)
+    if banned then
+        if candidate then
+            candidate.eligible = false
+            candidate.selected = false
+            candidate.status = "skipped"
+            candidate.result = "banned"
+            candidate.processedAt = now()
+            markVisibleCandidate(candidate, "skipped", "banned")
+        end
+        warnLine("Skipped banned character:", tostring(banned.key or candidate.fullName or candidate.name or candidate.key))
+        refreshInvitePanel()
+        return false, string.format("Cannot invite %s. Character is listed in Ban Book.", tostring(banned.key or candidate.fullName or candidate.name or candidate.key))
     end
 
     if hasGuild(candidate) then
@@ -794,6 +847,11 @@ function Queue:_processLiveNext()
         warnLine("Live invite blocked guilded candidate:", tostring(item.fullName or item.name or item.key))
         self:_scheduleLiveRun(0.1)
         refreshInvitePanel()
+        return
+    end
+
+    if markBannedSkipped(item) then
+        self:_scheduleLiveRun(0.1)
         return
     end
 

@@ -5,6 +5,7 @@ local GC = ns.GuildCore
 
 GC.UI.RosterPanel = {}
 local RP = GC.UI.RosterPanel
+GC.UI.Roster = RP
 
 local function T()  return GC.UI.Theme end
 local function GS() return GC.Services.GuildService end
@@ -17,109 +18,10 @@ local function normalizeFocusName(value)
 end
 
 local function hideContextMenu()
-    if RP.contextMenu then
-        RP.contextMenu._item = nil
-        RP.contextMenu:Hide()
+    if GC.UI and GC.UI.CharacterContextMenu then
+        GC.UI.CharacterContextMenu:Close()
     end
     RP.contextItemKey = nil
-end
-
-local function setCursorAnchor(frame)
-    local scale = UIParent:GetEffectiveScale() or 1
-    local x, y = GetCursorPosition()
-    x = (x or 0) / scale
-    y = (y or 0) / scale
-    local offsetX, offsetY = 12, -12
-    local width = frame:GetWidth() or 0
-    local height = frame:GetHeight() or 0
-    local screenWidth = UIParent:GetWidth() or 0
-    local screenHeight = UIParent:GetHeight() or 0
-    x = math.max(0, math.min(x + offsetX, math.max(0, screenWidth - width)))
-    y = math.max(height, math.min(y + offsetY, screenHeight))
-    frame:ClearAllPoints()
-    frame:SetPoint("TOPLEFT", UIParent, "BOTTOMLEFT", x, y)
-end
-
-local function showContextMenu(item)
-    local Th = T()
-    if not RP.contextMenu then
-        local menu = CreateFrame("Frame", nil, UIParent)
-        menu:SetSize(148, 94)
-        if GC.UI.Layering then
-            GC.UI.Layering:ApplyPopup(menu, GC.UI.MainFrame and GC.UI.MainFrame.frame, 40)
-        else
-            menu:SetFrameStrata("DIALOG")
-        end
-        Th.Bg(menu, Th.c.panelAlt, Th.c.borderStrong)
-        menu:Hide()
-        menu:EnableMouse(true)
-
-        local whisperBtn = GC.UI.Button.Create(menu, "Whisper", "secondary", 136, Th.btnH)
-        whisperBtn:SetPoint("TOPLEFT", menu, "TOPLEFT", 6, -4)
-        whisperBtn:SetScript("OnClick", function()
-            local target = menu._item
-            hideContextMenu()
-            if not target then return end
-            local ok, err = GS():OpenWhisper(target.key)
-            local mf = GC.UI.MainFrame
-            if mf then
-                mf:SetStatus(ok and ("Opening whisper to " .. (target.name or "member") .. ".") or (err or "Unable to whisper member."), ok and "textSuccess" or "textDanger")
-            end
-        end)
-        menu.whisperBtn = whisperBtn
-
-        local inviteBtn = GC.UI.Button.Create(menu, "Invite to Party", "secondary", 136, Th.btnH)
-        inviteBtn:SetPoint("TOPLEFT", menu, "TOPLEFT", 6, -34)
-        inviteBtn:SetScript("OnClick", function()
-            local target = menu._item
-            hideContextMenu()
-            if not target then return end
-            local ok, err = GS():InviteToParty(target.key)
-            local mf = GC.UI.MainFrame
-            if mf then
-                mf:SetStatus(ok and ("Party invite sent to " .. (target.name or "member") .. ".") or (err or "Unable to invite member."), ok and "textSuccess" or "textDanger")
-            end
-        end)
-
-        local purgeBtn = GC.UI.Button.Create(menu, "Queue Purge", "danger", 136, Th.btnH)
-        purgeBtn:SetPoint("TOPLEFT", menu, "TOPLEFT", 6, -64)
-        purgeBtn:SetScript("OnClick", function()
-            local target = menu._item
-            hideContextMenu()
-            if not target then return end
-            local live = GC.Services.DataStore:GetPlayer(target.key) or target
-            local ok, err = GC.Services.Operations:Kick(live)
-            local mf = GC.UI.MainFrame
-            if mf then
-                mf:SetStatus(ok and "Purge queued. Build and execute the macro to remove this member." or (err or "Unable to queue purge."), ok and "textWarn" or "textDanger")
-            end
-            if ok and GC.UI.PurgePanel and GC.UI.PurgePanel.Refresh then
-                GC.UI.PurgePanel:Refresh()
-            end
-        end)
-        menu.purgeBtn = purgeBtn
-
-        RP.contextMenu = menu
-    end
-
-    if RP.contextMenu:IsShown() and RP.contextItemKey and item and RP.contextItemKey == item.key then
-        hideContextMenu()
-        return
-    end
-
-    local menu = RP.contextMenu
-    menu._item = item
-    RP.contextItemKey = item and item.key or nil
-    if menu.whisperBtn then
-        menu.whisperBtn:SetEnabled(item and item.isOnline)
-    end
-    if menu.purgeBtn then
-        local live = item and GC.Services.DataStore:GetPlayer(item.key) or item
-        local availability = live and GC.Services.Operations:GetActionAvailability(live) or nil
-        menu.purgeBtn:SetEnabled(availability and availability.kick and availability.kick.enabled)
-    end
-    setCursorAnchor(menu)
-    menu:Show()
 end
 
 local CLASSIFICATION_ORDER = {
@@ -135,6 +37,25 @@ local STATUS_ORDER = {
 
 local function lowerText(value)
     return tostring(value or ""):lower()
+end
+
+local function wipeTable(tbl)
+    if wipe then return wipe(tbl) end
+    for key in pairs(tbl) do tbl[key] = nil end
+    return tbl
+end
+
+local function rosterSettings()
+    local settings = GC.Services and GC.Services.DataStore and GC.Services.DataStore:GetSettings() or {}
+    settings.roster = type(settings.roster) == "table" and settings.roster or {}
+    if settings.roster.onlineOnly == nil then settings.roster.onlineOnly = false end
+    if settings.roster.groupAlts == nil then settings.roster.groupAlts = false end
+    return settings.roster
+end
+
+local function saveRosterSetting(key, value)
+    local settings = rosterSettings()
+    settings[key] = value
 end
 
 local function safeNumber(value, fallback)
@@ -175,14 +96,14 @@ local SORT_GETTERS = {
 -- Column layout: {label, xOffset, width, field, sortField, sortType}
 -- sortField: key into SORT_GETTERS; sortType: "alpha" | "num" | "time"
 local COLS = {
-    {label = "Name",      x = 6,   w = 118, field = "name",              sortField = "name",            sortType = "alpha"},
-    {label = "Main/Alt",  x = 128, w = 46,  field = "classificationBadge", sortField = "classification",  sortType = "num"},
-    {label = "Rank",      x = 178, w = 92,  field = "rankShort",          sortField = "rankIndex",       sortType = "num",  role = "data"},
-    {label = "Class",     x = 274, w = 120, field = "classSpecDisplay",   sortField = "classDisplayName",sortType = "alpha"},
-    {label = "Lvl",       x = 360, w = 30,  field = "level",              sortField = "level",           sortType = "num",  role = "data"},
-    {label = "Status",    x = 394, w = 58,  field = "statusLabel",        sortField = "statusLabel",     sortType = "num"},
-    {label = "Location",  x = 456, w = 116, field = "locationDisplay",    sortField = "locationDisplay", sortType = "alpha", role = "data"},
-    {label = "Seen",      x = 576, w = 72,  field = "lastSeenDisplay",    sortField = "lastSeenAt",      sortType = "time",  role = "data"},
+    {label = "Name",      x = 10,  w = 134, field = "name",              sortField = "name",            sortType = "alpha", role = "body"},
+    {label = "Main/Alt",  x = 152, w = 58,  field = "classificationBadge", sortField = "classification",  sortType = "num", role = "body"},
+    {label = "Rank",      x = 218, w = 104, field = "rankShort",          sortField = "rankIndex",       sortType = "num",  role = "body"},
+    {label = "Class",     x = 330, w = 142, field = "classSpecDisplay",   sortField = "classDisplayName",sortType = "alpha", role = "body"},
+    {label = "Lvl",       x = 458, w = 38,  field = "level",              sortField = "level",           sortType = "num",  role = "body"},
+    {label = "Status",    x = 504, w = 74,  field = "statusLabel",        sortField = "statusLabel",     sortType = "num", role = "body"},
+    {label = "Location",  x = 586, w = 142, field = "locationDisplay",    sortField = "locationDisplay", sortType = "alpha", role = "body"},
+    {label = "Seen",      x = 736, w = 86,  field = "lastSeenDisplay",    sortField = "lastSeenAt",      sortType = "time",  role = "body"},
 }
 
 local function buildRow(row, item)
@@ -202,6 +123,9 @@ local function buildRow(row, item)
         local val = tostring(item[col.field] or "—")
         local fs  = row._cols[i]
         if col.field == "name" then
+            fs:ClearAllPoints()
+            fs:SetPoint("LEFT", (item._groupIndent and 24 or col.x), 0)
+            fs:SetWidth(item._groupIndent and (col.w - 14) or col.w)
             local rgb = item.classRGB or {1, 1, 1}
             fs:SetTextColor(rgb[1], rgb[2], rgb[3], 1)
             fs:SetText(val)
@@ -234,12 +158,16 @@ end
 
 -- ─── sort helpers ─────────────────────────────
 
+local _sortPool      = {}  -- pooled entry tables; avoids N allocs per sort call
+local _sortDecorated = {}  -- reused decorated array
+local _filterRebuildCount = 0
+local _groupRebuildCount  = 0
+
 local function applySort(data, sortField, sortType, asc)
     if not sortField then return data end
     local getter = SORT_GETTERS[sortField]
     if not getter then return data end
 
-    local decorated = {}
     local count = 0
     for i = 1, #(data or {}) do
         local item = data[i] or {}
@@ -250,14 +178,19 @@ local function applySort(data, sortField, sortType, asc)
             value = lowerText(value)
         end
         count = count + 1
-        decorated[count] = {
-            item = item,
-            index = i,
-            value = value,
-            name = lowerText(item.name or item.key),
-            key = lowerText(item.key),
-        }
+        local e = _sortPool[count]
+        if not e then
+            e = {}
+            _sortPool[count] = e
+        end
+        e.item  = item
+        e.index = i
+        e.value = value
+        e.name  = lowerText(item.name or item.key)
+        e.key   = lowerText(item.key)
+        _sortDecorated[count] = e
     end
+    for i = count + 1, #_sortDecorated do _sortDecorated[i] = nil end
 
     local function comesBefore(a, b)
         if not a then return false end
@@ -282,41 +215,153 @@ local function applySort(data, sortField, sortType, asc)
     -- were intermittently tripping "invalid order function" even with a
     -- strict comparator, so this stable insertion sort keeps header toggles
     -- deterministic and Lua-error free.
-    for i = 2, #decorated do
-        local current = decorated[i]
+    for i = 2, count do
+        local current = _sortDecorated[i]
         local j = i - 1
-        while j >= 1 and comesBefore(current, decorated[j]) do
-            decorated[j + 1] = decorated[j]
+        while j >= 1 and comesBefore(current, _sortDecorated[j]) do
+            _sortDecorated[j + 1] = _sortDecorated[j]
             j = j - 1
         end
-        decorated[j + 1] = current
+        _sortDecorated[j + 1] = current
     end
 
     local sorted = {}
-    for i = 1, #decorated do
-        sorted[i] = decorated[i].item
+    for i = 1, count do
+        sorted[i] = _sortDecorated[i].item
     end
     return sorted
 end
 
 -- ─── filter helpers ────────────────────────────
 
-local function applyFilters(data, searchText, onlineOnly)
-    if (not searchText or searchText == "") and not onlineOnly then
-        return data
+local function matchesDashboardFilter(item, filterKey)
+    if not filterKey or filterKey == "" or filterKey == "all" then
+        return true
     end
-    local q = searchText and searchText:lower() or ""
-    local out = {}
-    for _, item in ipairs(data) do
-        local nameMatch = (q == "") or
-            (item.name       and item.name:lower():find(q, 1, true)) or
-            (item.rankName   and item.rankName:lower():find(q, 1, true)) or
-            (item.classDisplayName and item.classDisplayName:lower():find(q, 1, true))
-        local onlineMatch = (not onlineOnly) or item.isOnline
-        if nameMatch and onlineMatch then
+    if filterKey == "online" then
+        return item.isOnline
+    end
+    if filterKey == "active" then
+        return item.lastSeenAt and (time() - item.lastSeenAt) <= 604800
+    end
+    if filterKey == "inactive" then
+        local threshold = GC.Services.GuildService and GC.Services.GuildService.GetInactivityThresholdDays
+            and GC.Services.GuildService:GetInactivityThresholdDays() or 30
+        return item.lastSeenAt and (time() - item.lastSeenAt) >= (threshold * 86400)
+    end
+    if filterKey == "unknown_main_alt" then
+        return (item.classification or "unknown") == "unknown"
+    end
+    if filterKey == "missing_discord" then
+        return item.discordVerified ~= true or GC.Utils.Trim(item.discordName or "") == ""
+    end
+    if filterKey == "initiates" then
+        return GC.Utils.NormalizeRankName(item.rankName) == "initiate"
+    end
+    return true
+end
+
+local function itemMatchesSearch(item, query)
+    local q = lowerText(query)
+    if q == "" then return true end
+    item._searchBlob = item._searchBlob or lowerText(
+        tostring(item.name or "") .. " " ..
+        tostring(item.key or "") .. " " ..
+        tostring(item.rankName or "") .. " " ..
+        tostring(item.classDisplayName or "") .. " " ..
+        tostring(item.classSpecDisplay or "")
+    )
+    return item._searchBlob:find(q, 1, true)
+end
+
+local function itemMatchesLetter(item, letter)
+    if not letter or letter == "" then return true end
+    local first = tostring(item.name or item.key or ""):sub(1, 1):upper()
+    return first == tostring(letter):upper()
+end
+
+local function itemMatchesNonTextFilters(item, filters)
+    return ((not filters.onlineOnly) or item.isOnline)
+        and matchesDashboardFilter(item, filters.dashboardFilter)
+        and itemMatchesLetter(item, filters.letter)
+end
+
+local function applyFilters(data, filters, out)
+    out = wipeTable(out or {})
+    local q = filters.searchText or ""
+    for _, item in ipairs(data or {}) do
+        item._groupIndent = false
+        if itemMatchesNonTextFilters(item, filters) and itemMatchesSearch(item, q) then
             out[#out + 1] = item
         end
     end
+    return out
+end
+
+local function groupRosterRows(sortedData, filters, byKey, emitted, out)
+    if not filters.groupAlts or not GC.AltMain or not GC.AltMain.GetGroup then
+        return sortedData
+    end
+    _groupRebuildCount = _groupRebuildCount + 1
+
+    -- Text search keeps the whole visible linked group for context. Online,
+    -- dashboard, and letter filters remain row-level filters so they do not
+    -- create confusing offline rows inside online-only results.
+    byKey = wipeTable(byKey or {})
+    emitted = wipeTable(emitted or {})
+    out = wipeTable(out or {})
+    local searchActive = (filters.searchText or "") ~= ""
+    for _, item in ipairs(sortedData or {}) do
+        if item.key then byKey[item.key] = item end
+    end
+
+    local function groupHasSearchMatch(group)
+        local q = filters.searchText or ""
+        if q == "" then return true end
+        for _, key in ipairs(group.members or {}) do
+            if byKey[key] and itemMatchesSearch(byKey[key], q) then
+                return true
+            end
+        end
+        return false
+    end
+
+    local function emitKey(key, indent)
+        local item = byKey[key]
+        if item and not emitted[key] and itemMatchesNonTextFilters(item, filters) then
+            emitted[key] = true
+            item._groupIndent = indent == true
+            out[#out + 1] = item
+        end
+    end
+
+    for _, item in ipairs(sortedData or {}) do
+        if item.key and not emitted[item.key] then
+            local group = GC.AltMain:GetGroup(item.key)
+            if group and group.members and #group.members > 1 then
+                if not groupHasSearchMatch(group) then
+                    emitted[item.key] = true
+                elseif byKey[group.mainKey] then
+                    local mainKey = group.mainKey
+                    emitKey(mainKey, false)
+                    for _, altKey in ipairs(group.alts or {}) do
+                        emitKey(altKey, true)
+                    end
+                else
+                    -- Main is not in the currently loaded roster; keep matching
+                    -- linked characters as normal rows rather than inventing data.
+                    for _, memberKey in ipairs(group.members or {}) do
+                        emitKey(memberKey, false)
+                    end
+                end
+            elseif not searchActive or itemMatchesSearch(item, filters.searchText) then
+                emitKey(item.key, false)
+            else
+                emitted[item.key] = true
+            end
+        end
+    end
+
     return out
 end
 
@@ -353,6 +398,19 @@ function RP:Create(parent)
     local countFs = Th.Fs(frame, "data", "", "textDimmed")
     countFs:SetPoint("LEFT", hdr, "RIGHT", 10, -2)
     self.countLabel = countFs
+    local savedFilters = rosterSettings()
+    self.filters = {
+        onlineOnly = savedFilters.onlineOnly == true,
+        searchText = "",
+        letter = savedFilters.lastLetterFilter,
+        groupAlts = savedFilters.groupAlts == true,
+        dashboardFilter = nil,
+    }
+    self._scratchFilter = {}
+    self._scratchGroup = {}
+    self._scratchSortSource = {}
+    self._scratchGroupByKey = {}
+    self._scratchGroupEmitted = {}
 
     -- ── Toolbar row ──────────────────────────────
     local toolbarY = -(P + 40)
@@ -375,27 +433,45 @@ function RP:Create(parent)
     hint:SetPoint("RIGHT", searchBox, "RIGHT", -6, 0)
     searchBox:SetScript("OnTextChanged", function(eb)
         hint:SetShown(eb:GetText() == "")
-        RP:_applyFilter()
+        RP.filters.searchText = eb:GetText() or ""
+        RP:ScheduleApplyFilters("search")
     end)
     searchBox:SetScript("OnEditFocusGained", function() hint:Hide() end)
     searchBox:SetScript("OnEditFocusLost",   function(eb) hint:SetShown(eb:GetText() == "") end)
     self.searchBox = searchBox
 
     -- Online filter button
-    local onlineBtn = GC.UI.Button.Create(frame, "All Members", "secondary", 110, Th.btnH)
+    local onlineBtn = GC.UI.Button.Create(frame, "Online Only", "secondary", 110, Th.btnH)
     onlineBtn:SetPoint("LEFT", searchBox, "RIGHT", P, 0)
     onlineBtn:SetTooltip("Toggle Online Filter", "Show only members who were online in the last scan.")
-    self._onlineOnly = false
     onlineBtn:SetScript("OnClick", function()
-        self._onlineOnly = not self._onlineOnly
-        onlineBtn:SetLabel(self._onlineOnly and "Online Only" or "All Members")
-        RP:_applyFilter()
+        self.filters.onlineOnly = not self.filters.onlineOnly
+        saveRosterSetting("onlineOnly", self.filters.onlineOnly)
+        RP:ApplyFilters()
     end)
     self.onlineBtn = onlineBtn
 
+    local groupBtn = GC.UI.Button.Create(frame, "Group Alts", "secondary", 92, Th.btnH)
+    groupBtn:SetPoint("LEFT", onlineBtn, "RIGHT", P/2, 0)
+    groupBtn:SetTooltip("Group Linked Characters", "Show linked main/alt characters together in the roster.")
+    groupBtn:SetScript("OnClick", function()
+        self.filters.groupAlts = not self.filters.groupAlts
+        saveRosterSetting("groupAlts", self.filters.groupAlts)
+        RP:ApplyFilters()
+    end)
+    self.groupBtn = groupBtn
+
+    local clearBtn = GC.UI.Button.Create(frame, "Clear Filters", "secondary", 96, Th.btnH)
+    clearBtn:SetPoint("LEFT", groupBtn, "RIGHT", P/2, 0)
+    clearBtn:SetTooltip("Clear Filters", "Clear search, alphabet, online, and dashboard filters.")
+    clearBtn:SetScript("OnClick", function()
+        RP:ClearFilters()
+    end)
+    self.clearBtn = clearBtn
+
     -- Refresh button
     local refreshBtn = GC.UI.Button.Create(frame, "Refresh", "secondary", 92, Th.btnH)
-    refreshBtn:SetPoint("LEFT", onlineBtn, "RIGHT", P/2, 0)
+    refreshBtn:SetPoint("LEFT", clearBtn, "RIGHT", P/2, 0)
     refreshBtn:SetTooltip("Refresh Roster", "Request a live roster update from the server.")
     refreshBtn:SetScript("OnClick", function()
         local ok, err = GC.Services.GuildService:TriggerScan()
@@ -405,10 +481,33 @@ function RP:Create(parent)
         end
     end)
 
-    Th.HSep(frame, toolbarY - Th.btnH - 6)
+    -- Alphabet quick filter
+    local alphaY = toolbarY - Th.btnH - 8
+    local alphaRow = CreateFrame("Frame", nil, frame)
+    alphaRow:SetPoint("TOPLEFT", frame, "TOPLEFT", P, alphaY)
+    alphaRow:SetPoint("TOPRIGHT", frame, "TOPRIGHT", -P, alphaY)
+    alphaRow:SetHeight(22)
+    self.alphaButtons = {}
+    local letters = {"All", "A", "B", "C", "D", "E", "F", "G", "H", "I", "J", "K", "L", "M", "N", "O", "P", "Q", "R", "S", "T", "U", "V", "W", "X", "Y", "Z"}
+    local x = 0
+    for _, label in ipairs(letters) do
+        local letterLabel = label
+        local width = letterLabel == "All" and 34 or 22
+        local btn = GC.UI.Button.Create(alphaRow, letterLabel, "secondary", width, 20)
+        btn:SetPoint("LEFT", alphaRow, "LEFT", x, 0)
+        btn:SetScript("OnClick", function()
+            self.filters.letter = letterLabel == "All" and nil or letterLabel
+            saveRosterSetting("lastLetterFilter", self.filters.letter)
+            RP:ApplyFilters("letter")
+        end)
+        self.alphaButtons[letterLabel] = btn
+        x = x + width + 3
+    end
+
+    Th.HSep(frame, alphaY - 26)
 
     -- ── Column header bar ────────────────────────
-    local colBarY = toolbarY - Th.btnH - 10
+    local colBarY = alphaY - 30
     local colBar  = CreateFrame("Frame", nil, frame)
     colBar:SetPoint("TOPLEFT",  frame, "TOPLEFT",  0, colBarY)
     colBar:SetPoint("TOPRIGHT", frame, "TOPRIGHT", 0, colBarY)
@@ -446,7 +545,7 @@ function RP:Create(parent)
                 RP._sortType = col.sortType
                 RP._sortAsc  = true
             end
-            RP:_applyFilter()
+            RP:ApplyFilters()
         end)
     end
 
@@ -457,12 +556,41 @@ function RP:Create(parent)
     listFrame:SetPoint("BOTTOMRIGHT", frame, "BOTTOMRIGHT", 0, P)
     self.listFrame = listFrame
 
-    self.list = GC.UI.List.Create(listFrame, Th.rowH, buildRow, function(item)
+    self.list = GC.UI.List.Create(listFrame, 36, buildRow, function(item)
         selectRosterItem(item, false)
     end, function(item)
-        showContextMenu(item)
+        if GC.UI.CharacterContextMenu then
+            item.source = "Roster"
+            GC.UI.CharacterContextMenu:Open(item)
+        end
     end)
     self.list:SetEmptyText("No members match the current filter.")
+    self:_refreshFilterControls()
+end
+
+function RP:ScheduleApplyFilters(reason)
+    if not C_Timer then
+        self:ApplyFilters(reason)
+        return
+    end
+    if self._filterDebounceTimer and self._filterDebounceTimer.Cancel then
+        self._filterDebounceTimer:Cancel()
+    end
+    self._filterDebounceToken = (self._filterDebounceToken or 0) + 1
+    local token = self._filterDebounceToken
+    local callback = function()
+        RP._filterDebounceTimer = nil
+        if RP._filterDebounceToken == token then
+            RP:ApplyFilters(reason or "debounced")
+        end
+    end
+    if C_Timer.NewTimer then
+        self._filterDebounceTimer = C_Timer.NewTimer(0.18, callback)
+    elseif C_Timer.After then
+        C_Timer.After(0.18, callback)
+    else
+        self:ApplyFilters(reason)
+    end
 end
 
 -- ─── internal filter/refresh ──────────────────
@@ -485,31 +613,211 @@ function RP:_refreshHeaderLabels()
     end
 end
 
-function RP:_applyFilter()
+function RP:_refreshFilterControls()
+    local filters = self.filters or {}
+    if self.onlineBtn then
+        self.onlineBtn:SetLabel(filters.onlineOnly and "Show All" or "Online Only")
+    end
+    if self.groupBtn then
+        self.groupBtn:SetLabel(filters.groupAlts and "Ungroup" or "Group Alts")
+    end
+    if self.alphaButtons then
+        local Th = T()
+        for label, btn in pairs(self.alphaButtons) do
+            local active = (label == "All" and not filters.letter) or label == filters.letter
+            if btn.SetButtonState then
+                btn:SetButtonState(active and "PUSHED" or "NORMAL")
+            end
+            if btn.SetAlpha then
+                btn:SetAlpha(active and 1 or 0.72)
+            end
+            if btn.SetBackdropBorderColor and Th.c then
+                local c = active and Th.c.accent or Th.c.border
+                btn:SetBackdropBorderColor(c[1], c[2], c[3], c[4] or 1)
+            end
+        end
+    end
+end
+
+function RP:_filterStatusParts()
+    local filters = self.filters or {}
+    local parts = {}
+    parts[#parts + 1] = filters.onlineOnly and "Online Only" or "Showing All"
+    if filters.letter then parts[#parts + 1] = "Letter " .. filters.letter end
+    if filters.searchText and filters.searchText ~= "" then parts[#parts + 1] = "Search \"" .. filters.searchText .. "\"" end
+    if filters.groupAlts then parts[#parts + 1] = "Grouped" end
+    if filters.dashboardFilter then
+        local labels = {
+            active = "Active",
+            inactive = "Inactive",
+            unknown_main_alt = "Unknown Main/Alt",
+            missing_discord = "Missing Discord",
+            initiates = "Initiates",
+        }
+        parts[#parts + 1] = labels[filters.dashboardFilter] or tostring(filters.dashboardFilter)
+    end
+    return table.concat(parts, " · ")
+end
+
+function RP:ApplyFilters(reason)
     if not self._allData then return end
-    local q = self.searchBox and self.searchBox:GetText() or ""
-    local filtered = applyFilters(self._allData, q, self._onlineOnly)
-    filtered = applySort(filtered, self._sortKey, self._sortType, self._sortAsc)
+    _filterRebuildCount = _filterRebuildCount + 1
+    local memBefore = GC.Perf and GC.Perf:Snapshot("Roster ApplyFilters before")
+    self.filters = self.filters or {}
+    self.filters.searchText = self.searchBox and (self.searchBox:GetText() or "") or (self.filters.searchText or "")
+    self.filters.dashboardFilter = self._dashboardFilter
+
+    local sortSource
+    if self.filters.groupAlts and self.filters.searchText ~= "" then
+        -- Search in grouped mode should include linked context, so delay text
+        -- filtering until group assembly can inspect the full linked set.
+        sortSource = wipeTable(self._scratchSortSource or {})
+        self._scratchSortSource = sortSource
+        for _, item in ipairs(self._allData or {}) do
+            item._groupIndent = false
+            if itemMatchesNonTextFilters(item, self.filters) then
+                sortSource[#sortSource + 1] = item
+            end
+        end
+    else
+        sortSource = applyFilters(self._allData, self.filters, self._scratchFilter)
+        self._scratchFilter = sortSource
+    end
+
+    local filtered = applySort(sortSource, self._sortKey, self._sortType, self._sortAsc)
+    filtered = groupRosterRows(filtered, self.filters, self._scratchGroupByKey, self._scratchGroupEmitted, self._scratchGroup)
+    self._scratchGroup = filtered
     self._filteredData = filtered
     if self.countLabel then
         local total = #self._allData
         local shown = #filtered
-        if shown == total then
-            self.countLabel:SetText("(" .. total .. " members)")
-        else
-            self.countLabel:SetText("(" .. shown .. " / " .. total .. " shown)")
-        end
+        self.countLabel:SetText("(" .. shown .. " / " .. total .. " shown) · " .. self:_filterStatusParts())
     end
+    self:_refreshFilterControls()
     self:_refreshHeaderLabels()
     self.list:Refresh(filtered)
+    if GC.Perf then GC.Perf:Delta("Roster ApplyFilters after" .. (reason and (" (" .. tostring(reason) .. ")") or ""), memBefore) end
+end
+
+RP._applyFilter = RP.ApplyFilters
+
+function RP:ClearFilters()
+    self._dashboardFilter = nil
+    self.filters = self.filters or {}
+    self.filters.onlineOnly = false
+    self.filters.letter = nil
+    self.filters.searchText = ""
+    if self.searchBox then self.searchBox:SetText("") end
+    saveRosterSetting("onlineOnly", false)
+    saveRosterSetting("lastLetterFilter", nil)
+    self:ApplyFilters()
+end
+
+function RP:ApplyDashboardFilter(filterKey)
+    self._dashboardFilter = filterKey ~= "all" and filterKey or nil
+    self.filters = self.filters or {}
+    self.filters.onlineOnly = filterKey == "online"
+    if self.searchBox then self.searchBox:SetText("") end
+    saveRosterSetting("onlineOnly", self.filters.onlineOnly)
+    self:ApplyFilters()
 end
 
 -- ─── Refresh ──────────────────────────────────
 
 function RP:Refresh()
     if not self.frame then return end
+    local memBefore = GC.Perf and GC.Perf:Snapshot("Roster Refresh before")
     self._allData = GS():GetRosterList()
-    self:_applyFilter()
+    self:ApplyFilters("refresh")
+    if GC.Perf then GC.Perf:Delta("Roster Refresh after", memBefore) end
+end
+
+function RP:GetListStats()
+    local stats = {}
+    if self.list and self.list.GetStats then
+        stats = self.list:GetStats()
+    else
+        stats.totalCreated = 0
+        stats.pooledRows   = 0
+        stats.visibleRows  = 0
+    end
+    stats.allDataCount       = #(self._allData or {})
+    stats.filteredCount      = #(self._filteredData or {})
+    stats.filterRebuildCount = _filterRebuildCount
+    stats.groupRebuildCount  = _groupRebuildCount
+    stats.sortPoolSize       = #_sortPool
+    return stats
+end
+
+-- Fields that should never contain full player/member objects in display rows.
+local _NESTED_FIELDS = {"member", "data", "group", "alts", "children"}
+
+local function isMemberObject(v)
+    -- A table is considered a "full member object" only if it has both .key
+    -- and .name as strings (player record shape). String-key arrays like
+    -- row.alts = {"Alt1-Realm"} are lightweight and intentionally allowed.
+    if type(v) ~= "table" then return false end
+    if type(v.key) == "string" and type(v.name) == "string" then return true end
+    -- Array of member objects: first element is itself a member object
+    if v[1] ~= nil and type(v[1]) == "table"
+       and type(v[1].key) == "string" and type(v[1].name) == "string" then
+        return true
+    end
+    return false
+end
+
+function RP:DumpStats()
+    local allData     = self._allData or {}
+    local filtered    = self._filteredData or {}
+    local mainRows, altRows, unlinkedRows, indentedRows = 0, 0, 0, 0
+    local nestedTableRows = 0
+
+    for _, row in ipairs(filtered) do
+        local cls = row.classification or "unknown"
+        if cls == "main" then
+            mainRows = mainRows + 1
+        elseif cls == "alt" then
+            altRows = altRows + 1
+            if row._groupIndent then indentedRows = indentedRows + 1 end
+        else
+            unlinkedRows = unlinkedRows + 1
+        end
+        for _, f in ipairs(_NESTED_FIELDS) do
+            if isMemberObject(row[f]) then
+                nestedTableRows = nestedTableRows + 1
+                break
+            end
+        end
+    end
+
+    local totalAltLinks = 0
+    local players = GC.Services and GC.Services.DataStore and GC.Services.DataStore:GetPlayers() or {}
+    for _, p in pairs(players) do
+        if type(p.alts) == "table" then totalAltLinks = totalAltLinks + #p.alts end
+    end
+
+    local gs    = GC.AltMain and GC.AltMain.GetGroupCacheStats and GC.AltMain:GetGroupCacheStats() or {}
+    local sPool = #_sortPool
+
+    return {
+        allDataCount      = #allData,
+        filteredCount     = #filtered,
+        mainRows          = mainRows,
+        altRows           = altRows,
+        unlinkedRows      = unlinkedRows,
+        indentedRows      = indentedRows,
+        nestedTableRows   = nestedTableRows,
+        totalAltLinks     = totalAltLinks,
+        filterRebuildCount = _filterRebuildCount,
+        groupRebuildCount  = _groupRebuildCount,
+        sortPoolSize       = sPool,
+        groupCacheChars    = gs.cachedCharacters or 0,
+        groupCacheGroups   = gs.cachedGroups     or 0,
+        maxGroupSize       = gs.maxGroupSize     or 0,
+        groupCacheValid    = gs.isCacheValid      or false,
+        altDataVersion     = gs.altDataVersion   or 0,
+        repairVersion      = gs.repairVersion    or 0,
+    }
 end
 
 function RP:FocusCharacter(value)
@@ -557,13 +865,16 @@ function RP:FocusCharacter(value)
         if self.searchBox then
             self.searchBox:SetText("")
         end
-        if self._onlineOnly then
-            self._onlineOnly = false
-            if self.onlineBtn then
-                self.onlineBtn:SetLabel("All Members")
-            end
+        self.filters = self.filters or {}
+        if self.filters.onlineOnly then
+            self.filters.onlineOnly = false
+            saveRosterSetting("onlineOnly", false)
         end
-        self:_applyFilter()
+        if self.filters.letter then
+            self.filters.letter = nil
+            saveRosterSetting("lastLetterFilter", nil)
+        end
+        self:ApplyFilters()
     end
 
     return selectRosterItem(found, true)

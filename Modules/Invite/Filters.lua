@@ -333,6 +333,10 @@ function Filters.EvaluateCandidate(candidate, settings, history)
         reasons[#reasons + 1] = "ignored"
     end
 
+    if GC.BanBook and GC.BanBook.IsBanned and GC.BanBook:IsBanned(candidate and (candidate.fullName or candidate.name or candidate.key), candidate and candidate.realm) then
+        reasons[#reasons + 1] = "banned"
+    end
+
     if Filters.IsRecentlyInvited(candidate, history, settings) then
         reasons[#reasons + 1] = "recently_invited"
     end

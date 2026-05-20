@@ -2,7 +2,7 @@
 ## Title: Guild Core
 ## Notes: Modern guild management suite for World of Warcraft (Retail).
 ## Author: Catastrophie
-## Version: 1.5.9
+## Version: 1.5.20
 ## SavedVariables: GuildCoreDB
 ## IconTexture: Interface/AddOns/GuildCore/Assets/icons/GC_Gold
 
@@ -10,6 +10,7 @@ Data\Defaults.lua
 
 Core\Init.lua
 Core\API.lua
+Core\Perf.lua
 Core\Registry.lua
 Core\Utils.lua
 Core\Database.lua
@@ -28,6 +29,7 @@ Modules\Roster\History.lua
 Modules\Bank\Service.lua
 
 Modules\Alts\Service.lua
+Modules\Compliance\Service.lua
 Modules\Points\Service.lua
 Modules\Messages\Module.lua
 Modules\Messages\Chunker.lua
@@ -44,6 +46,7 @@ Modules\Purge\Service.lua
 Modules\Operations\Service.lua
 Modules\Operations\MacroBuilder.lua
 Modules\Sync\Service.lua
+Modules\BanBook.lua
 Modules\Invite\Module.lua
 Modules\Invite\Service.lua
 Modules\Invite\Filters.lua
@@ -60,16 +63,34 @@ UI\Components\Button.lua
 UI\Components\Panel.lua
 UI\Components\List.lua
 
+UI\Settings\SettingsFrame.lua
+UI\Settings\SettingsSidebar.lua
+UI\Settings\Categories\Appearance.lua
+UI\Settings\Categories\Roster.lua
+UI\Settings\Categories\Recruitment.lua
+UI\Settings\Categories\Messaging.lua
+UI\Settings\Categories\Moderation.lua
+UI\Settings\Categories\MainAlt.lua
+UI\Settings\Categories\Points.lua
+UI\Settings\Categories\GuildBank.lua
+UI\Settings\Categories\Permissions.lua
+UI\Settings\Categories\Advanced.lua
+UI\Settings\Categories\Debug.lua
+UI\Settings\Categories\About.lua
+
 UI\MainFrame.lua
+UI\CharacterContextMenu.lua
 UI\MinimapButton.lua
 UI\CommunityTab.lua
 UI\Dashboard.lua
 UI\PurgePanel.lua
 UI\RosterPanel.lua
+UI\EditCharacterPopup.lua
 UI\PlayerPanel.lua
 UI\LogPanel.lua
 UI\MessagingPanel.lua
 UI\InvitePanel.lua
+UI\BanBookPanel.lua
 UI\SettingsPanel.lua
 
 GuildCore.lua

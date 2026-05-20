@@ -146,6 +146,7 @@ function LP:Create(parent)
         btn:SetPoint("TOPLEFT", frame, "TOPLEFT", P + (i-1) * (btnW + btnGap), filterY)
         local catId = cat.id
         btn:SetScript("OnClick", function()
+            LP._dashboardEventFilter = nil
             LP._activeFilter = catId
             LP:_updateFilterButtons()
             LP:_applyFilter()
@@ -177,7 +178,15 @@ function LP:Create(parent)
     listFrame:SetPoint("TOPLEFT",     frame, "TOPLEFT",     0, listTop)
     listFrame:SetPoint("BOTTOMRIGHT", frame, "BOTTOMRIGHT", 0, P)
 
-    self.list = GC.UI.List.Create(listFrame, Th.rowH, buildLogRow, nil)
+    self.list = GC.UI.List.Create(listFrame, Th.rowH, buildLogRow, nil, function(item)
+        if item and item.playerKey and GC.UI.CharacterContextMenu then
+            GC.UI.CharacterContextMenu:Open({
+                key = item.playerKey,
+                fullName = item.playerKey,
+                source = "Activity",
+            })
+        end
+    end)
     self.list:SetEmptyText("No log entries for this filter.")
 
     self:_updateFilterButtons()
@@ -220,6 +229,16 @@ function LP:_applyFilter()
             end
         end
     end
+    if self._dashboardEventFilter then
+        local eventFiltered = {}
+        for _, e in ipairs(filtered) do
+            if e.event == self._dashboardEventFilter then
+                eventFiltered[#eventFiltered + 1] = e
+            end
+        end
+        filtered = eventFiltered
+        selectedLabel = self._dashboardEventFilter == "JOINED" and "joined events" or self._dashboardEventFilter == "LEFT" and "left events" or selectedLabel
+    end
     if self.countLabel then
         local total = #self._allLogs
         local shown = #filtered
@@ -237,6 +256,25 @@ function LP:_applyFilter()
         end
     end
     self.list:Refresh(filtered)
+end
+
+function LP:ApplyDashboardFilter(filterKey)
+    local target = filterKey or "all"
+    self._dashboardEventFilter = nil
+    if target == "joined" then
+        self._dashboardEventFilter = "JOINED"
+        target = "roster"
+    elseif target == "left" then
+        self._dashboardEventFilter = "LEFT"
+        target = "roster"
+    elseif target == "rank_changes" then
+        target = "ranks"
+    elseif not self._filterBtns[target] then
+        target = "all"
+    end
+    self._activeFilter = target
+    self:_updateFilterButtons()
+    self:_applyFilter()
 end
 
 -- ─── Refresh ──────────────────────────────────

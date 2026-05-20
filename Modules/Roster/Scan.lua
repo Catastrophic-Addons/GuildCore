@@ -23,7 +23,7 @@ function GC.Modules.RosterScan:Capture()
     local totalMembers = GetNumGuildMembers()
     local totalRanks = GetNumGuildRanks and GetNumGuildRanks() or nil
     for index = 1, totalMembers do
-        local fullName, rankName, rankIndex, level, classDisplayName, zone, publicNote, officerNote, isOnline, status, classFileName, achievementPoints, achievementRank, isMobile, canSoR, reputation, yearsOffline, monthsOffline, daysOffline, hoursOffline = GC.API.GetGuildRosterInfo(index)
+        local fullName, rankName, rankIndex, level, classDisplayName, zone, publicNote, officerNote, isOnline, status, classFileName, achievementPoints, achievementRank, isMobile, canSoR, reputation, yearsOffline, monthsOffline, daysOffline, hoursOffline, guid = GC.API.GetGuildRosterInfo(index)
 
         if fullName then
             local name, realm = GC.Utils.SplitGuildName(fullName)
@@ -52,6 +52,7 @@ function GC.Modules.RosterScan:Capture()
                 level = level,
                 classDisplayName = classDisplayName,
                 classFileName = classFileName,
+                guid = guid,
                 zone = zone,
                 publicNote = publicNote,
                 officerNote = officerNote,

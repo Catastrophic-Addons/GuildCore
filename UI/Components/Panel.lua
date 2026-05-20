@@ -16,6 +16,7 @@ local function T() return GC.UI.Theme end
 function Panel.Create(parent, bgKey, bdrKey)
     local Th = T()
     local f  = CreateFrame("Frame", nil, parent)
+    if GC.Perf then GC.Perf:CountUI("frames", 1) end
 
     local c  = Th.c[bgKey  or "panel"]
     local b  = bdrKey and Th.c[bdrKey] or nil
@@ -31,6 +32,7 @@ function Panel.Section(parent, title, h)
     local P  = Th.padding
 
     local frame = CreateFrame("Frame", nil, parent)
+    if GC.Perf then GC.Perf:CountUI("frames", 1) end
     Th.Bg(frame, Th.c.panel, Th.c.border)
 
     -- Title bar background
@@ -54,6 +56,7 @@ function Panel.Section(parent, title, h)
 
     -- Inner content frame
     local content = CreateFrame("Frame", nil, frame)
+    if GC.Perf then GC.Perf:CountUI("frames", 1) end
     content:SetPoint("TOPLEFT",  frame, "TOPLEFT",  P, -36)
     content:SetPoint("BOTTOMRIGHT", frame, "BOTTOMRIGHT", -P, P)
 
@@ -69,6 +72,10 @@ function Panel.Input(parent, w, h)
     w = w or 180
 
     local eb = CreateFrame("EditBox", nil, parent)
+    if GC.Perf then
+        GC.Perf:CountUI("inputs", 1)
+        GC.Perf:CountUI("textures", 5)
+    end
     eb:SetSize(w, h)
     eb:SetAutoFocus(false)
     eb:SetTextInsets(6, 6, 0, 0) -- 6 px L/R breathing room inside the 1-px border
@@ -128,6 +135,7 @@ end
 function Panel.StatTile(parent, label, value)
     local Th  = T()
     local f   = CreateFrame("Frame", nil, parent)
+    if GC.Perf then GC.Perf:CountUI("frames", 1) end
     Th.Bg(f, Th.c.panelAlt, Th.c.border)
 
     -- Accent top stripe

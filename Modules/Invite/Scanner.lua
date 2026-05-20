@@ -431,6 +431,19 @@ local function countEligible(candidates)
     return eligible
 end
 
+local function isBannedCandidate(candidate, realmInfo)
+    if not (candidate and GC.BanBook and GC.BanBook.IsBanned) then
+        return false
+    end
+    assumeCandidateRealm(candidate, realmInfo)
+    local banned, entry = GC.BanBook:IsBanned(candidate.fullName or candidate.name or candidate.key, candidate.realm)
+    if banned then
+        printLine("Skipped banned character:", tostring(entry and entry.key or candidate.fullName or candidate.name or candidate.key))
+        return true
+    end
+    return false
+end
+
 -- ── Internal helpers ──────────────────────────────────────────────────────
 
 local function cancelTimeout(state)
@@ -1123,7 +1136,9 @@ function Scanner:HandleWhoListUpdate()
         local evaluatedThisQuery = {}
         for i = 1, tonumber(shown or 0) do
             local candidate = normalizeCandidate(GC.API.GetWhoInfo(i), query, scannedAt)
-            if candidate and candidate.key and not candidateByKey[candidate.key] then
+            if candidate and candidate.key and isBannedCandidate(candidate, cur.scan.realmInfo) then
+                hiddenIneligible = hiddenIneligible + 1
+            elseif candidate and candidate.key and not candidateByKey[candidate.key] then
                 local realmAllowed = passesLocalRealmFilter(candidate, cur.scan.realmInfo)
                 if filters and filters.EvaluateCandidate then
                     local res = filters.EvaluateCandidate(candidate, settings, history)

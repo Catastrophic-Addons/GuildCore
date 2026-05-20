@@ -28,6 +28,24 @@ local function guildDisplayName()
     return guildName
 end
 
+local function pendingClassificationCount()
+    local settings = GC.Services and GC.Services.DataStore and GC.Services.DataStore:GetSettings() or nil
+    if settings and settings.enableClassificationPrompts == false then return 0 end
+    local players = GC.Services and GC.Services.DataStore and GC.Services.DataStore:GetPlayers() or nil
+    local count = 0
+    for _, player in pairs(players or {}) do
+        local promptState = player.promptState or {}
+        if player.status == "active"
+            and player.classification == "unknown"
+            and player.isTrackedRank ~= false
+            and not promptState.dismissedAt
+            and not promptState.bootstrapSuppressed then
+            count = count + 1
+        end
+    end
+    return count
+end
+
 -- panels keyed by id; each has {frame, hasDetail, refresh}
 local panels      = {}
 local navButtons  = {}
@@ -59,19 +77,26 @@ end
 local function showPanel(id, skipRefresh)
     local Th = T()
     if not panels[id] then id = "dashboard" end
+    local target = panels[id]
+    if target and not target.frame and target.create then
+        target.create()
+    end
 
     for pid, p in pairs(panels) do
         if pid == id then
-            p.frame:Show()
+            if p.frame then p.frame:Show() end
             if p.refresh and not skipRefresh then p.refresh() end
         else
-            p.frame:Hide()
+            if p.frame then p.frame:Hide() end
         end
     end
 
     -- Right detail column visibility (Roster only)
     if MF.detailCol then
         if panels[id] and panels[id].hasDetail then
+            if GC.UI.PlayerPanel and not GC.UI.PlayerPanel.frame then
+                GC.UI.PlayerPanel:Create(MF.detailCol)
+            end
             MF.detailCol:Show()
             MF.contentArea:SetPoint("TOPRIGHT", MF.detailCol, "TOPLEFT", -2, 0)
         else
@@ -170,17 +195,21 @@ function MF:RefreshPrompt()
     end
 
     self.promptTargetKey = prompt.key
-    self.promptSlot:SetHeight(72)
+    self.promptSlot:SetHeight(78)
     self.promptFrame:Show()
     self.panelHost:ClearAllPoints()
-    self.panelHost:SetPoint("TOPLEFT", self.contentArea, "TOPLEFT", 0, -72)
-    self.panelHost:SetPoint("TOPRIGHT", self.contentArea, "TOPRIGHT", 0, -72)
+    self.panelHost:SetPoint("TOPLEFT", self.contentArea, "TOPLEFT", 0, -78)
+    self.panelHost:SetPoint("TOPRIGHT", self.contentArea, "TOPRIGHT", 0, -78)
     self.panelHost:SetPoint("BOTTOMLEFT", self.contentArea, "BOTTOMLEFT", 0, 0)
     self.panelHost:SetPoint("BOTTOMRIGHT", self.contentArea, "BOTTOMRIGHT", 0, 0)
 
     local promptName = prompt.name or (prompt.key and prompt.key:match("^([^%-]+)")) or "Unknown"
     local firstSeen = prompt.firstSeenAt and date("%Y-%m-%d", prompt.firstSeenAt) or "recently"
-    self.promptLabel:SetText(string.format("%s was first detected on %s. Mark as Main or link as Alt.", promptName, firstSeen))
+    local promptCount = pendingClassificationCount()
+    if self.promptTitle then
+        self.promptTitle:SetText(promptCount > 1 and ("Pending Classification (" .. tostring(promptCount) .. ")") or "Pending Classification")
+    end
+    self.promptLabel:SetText(string.format("%s | First detected: %s | Status: Unknown main/alt", promptName, firstSeen))
     self.promptInput:SetText(prompt.main or "")
 end
 
@@ -387,6 +416,12 @@ function MF:Create()
         MF:RefreshActive()
     end)
     frame:SetScript("OnHide", function()
+        if GC.UI and GC.UI.CharacterContextMenu then
+            GC.UI.CharacterContextMenu:Close()
+        end
+        if GC.UI and GC.UI.EditCharacterPopup and GC.UI.EditCharacterPopup.frame then
+            GC.UI.EditCharacterPopup:Cancel()
+        end
         shadow:Hide()
         saveUIState()
     end)
@@ -500,6 +535,7 @@ function MF:Create()
         {id = "roster",     label = "Roster"},
         {id = "purge",      label = "Purge"},
         {id = "invite",     label = "Invite"},
+        {id = "banbook",    label = "Ban Book"},
         {id = "log",        label = "Activity"},
         {id = "messaging",  label = "Messages"},
         {id = "settings",   label = "Settings"},
@@ -588,17 +624,18 @@ function MF:Create()
     local promptFrame = CreateFrame("Frame", nil, promptSlot)
     promptFrame:SetPoint("TOPLEFT", promptSlot, "TOPLEFT", 8, -8)
     promptFrame:SetPoint("TOPRIGHT", promptSlot, "TOPRIGHT", -8, -8)
-    promptFrame:SetHeight(56)
+    promptFrame:SetHeight(62)
     Th.Bg(promptFrame, Th.c.panelAlt, Th.c.borderAccent)
     promptFrame:Hide()
     self.promptFrame = promptFrame
 
-    local promptTitle = Th.Fs(promptFrame, "tiny", "Classification Prompt", "textAccent")
+    local promptTitle = Th.Fs(promptFrame, "tiny", "Pending Classification", "textAccent")
     promptTitle:SetPoint("TOPLEFT", 10, -6)
+    self.promptTitle = promptTitle
 
     local promptLabel = Th.Fs(promptFrame, "data", "", "textSecond")
-    promptLabel:SetPoint("TOPLEFT", 10, -20)
-    promptLabel:SetPoint("TOPRIGHT", promptFrame, "TOPRIGHT", -390, -20)
+    promptLabel:SetPoint("TOPLEFT", 10, -22)
+    promptLabel:SetPoint("TOPRIGHT", promptFrame, "TOPRIGHT", -430, -20)
     promptLabel:SetJustifyH("LEFT")
     self.promptLabel = promptLabel
 
@@ -624,7 +661,7 @@ function MF:Create()
         GC.UI.PlayerPanel:ShowPlayerByKey(self.promptTargetKey)
     end)
 
-    local promptAltBtn = GC.UI.Button.Create(promptFrame, "Alt", "secondary", 44, Th.btnH)
+    local promptAltBtn = GC.UI.Button.Create(promptFrame, "Link Alt", "secondary", 64, Th.btnH)
     promptAltBtn:SetPoint("RIGHT", promptViewBtn, "LEFT", -6, 0)
     promptAltBtn:SetScript("OnClick", function()
         if not self.promptTargetKey then return end
@@ -638,7 +675,7 @@ function MF:Create()
         self:RefreshActive()
     end)
 
-    local promptMainBtn = GC.UI.Button.Create(promptFrame, "Main", "success", 52, Th.btnH)
+    local promptMainBtn = GC.UI.Button.Create(promptFrame, "Mark Main", "success", 78, Th.btnH)
     promptMainBtn:SetPoint("RIGHT", promptInput, "LEFT", -6, 0)
     promptMainBtn:SetScript("OnClick", function()
         if not self.promptTargetKey then return end
@@ -654,23 +691,41 @@ function MF:Create()
     panelHost:SetPoint("BOTTOMRIGHT", contentArea, "BOTTOMRIGHT", 0, 0)
     self.panelHost = panelHost
 
-    -- ── Create panels ─────────────────────────────
-    GC.UI.Dashboard:Create(panelHost)
-    GC.UI.PurgePanel:Create(panelHost)
-    GC.UI.RosterPanel:Create(panelHost)
-    GC.UI.PlayerPanel:Create(detailCol)
-    GC.UI.InvitePanel:Create(panelHost)
-    GC.UI.LogPanel:Create(panelHost)
-    GC.UI.MessagingPanel:Create(panelHost)
-    GC.UI.SettingsPanel:Create(panelHost)
-
-    panels.dashboard  = {frame = GC.UI.Dashboard.frame,       refresh = function() GC.UI.Dashboard:Refresh()       end, hasDetail = false}
-    panels.roster     = {frame = GC.UI.RosterPanel.frame,     refresh = function() GC.UI.RosterPanel:Refresh()     end, hasDetail = true}
-    panels.purge      = {frame = GC.UI.PurgePanel.frame,      refresh = function() GC.UI.PurgePanel:Refresh()      end, hasDetail = false}
-    panels.invite     = {frame = GC.UI.InvitePanel.frame,     refresh = function() GC.UI.InvitePanel:Refresh()     end, hasDetail = false}
-    panels.log        = {frame = GC.UI.LogPanel.frame,        refresh = function() GC.UI.LogPanel:Refresh()        end, hasDetail = false}
-    panels.messaging  = {frame = GC.UI.MessagingPanel.frame,  refresh = function() GC.UI.MessagingPanel:Refresh()  end, hasDetail = false}
-    panels.settings   = {frame = GC.UI.SettingsPanel.frame,   refresh = function() GC.UI.SettingsPanel:Refresh()   end, hasDetail = false}
+    -- ── Lazy panel registry ───────────────────────
+    -- Build panels only when opened. This avoids paying the UI object cost for
+    -- Messages/Invite/Settings/etc. just because the main window was shown.
+    panels.dashboard  = {hasDetail = false, create = function()
+        GC.UI.Dashboard:Create(panelHost)
+        panels.dashboard.frame = GC.UI.Dashboard.frame
+    end, refresh = function() GC.UI.Dashboard:Refresh() end}
+    panels.roster     = {hasDetail = true, create = function()
+        GC.UI.RosterPanel:Create(panelHost)
+        panels.roster.frame = GC.UI.RosterPanel.frame
+    end, refresh = function() GC.UI.RosterPanel:Refresh() end}
+    panels.purge      = {hasDetail = false, create = function()
+        GC.UI.PurgePanel:Create(panelHost)
+        panels.purge.frame = GC.UI.PurgePanel.frame
+    end, refresh = function() GC.UI.PurgePanel:Refresh() end}
+    panels.invite     = {hasDetail = false, create = function()
+        GC.UI.InvitePanel:Create(panelHost)
+        panels.invite.frame = GC.UI.InvitePanel.frame
+    end, refresh = function() GC.UI.InvitePanel:Refresh() end}
+    panels.banbook    = {hasDetail = false, create = function()
+        GC.UI.BanBookPanel:Create(panelHost)
+        panels.banbook.frame = GC.UI.BanBookPanel.frame
+    end, refresh = function() GC.UI.BanBookPanel:Refresh() end}
+    panels.log        = {hasDetail = false, create = function()
+        GC.UI.LogPanel:Create(panelHost)
+        panels.log.frame = GC.UI.LogPanel.frame
+    end, refresh = function() GC.UI.LogPanel:Refresh() end}
+    panels.messaging  = {hasDetail = false, create = function()
+        GC.UI.MessagingPanel:Create(panelHost)
+        panels.messaging.frame = GC.UI.MessagingPanel.frame
+    end, refresh = function() GC.UI.MessagingPanel:Refresh() end}
+    panels.settings   = {hasDetail = false, create = function()
+        GC.UI.SettingsPanel:Create(panelHost)
+        panels.settings.frame = GC.UI.SettingsPanel.frame
+    end, refresh = function() GC.UI.SettingsPanel:Refresh() end}
 
     -- Restore last panel (no refresh; frame is still hidden).
     local startPanel = (uiState.lastPanel and panels[uiState.lastPanel]) and uiState.lastPanel or "dashboard"
@@ -707,6 +762,7 @@ function GC.UI:Show()
     end
     if MF.miniFrame then MF.miniFrame:Hide() end
     MF.frame:Show()
+    MF:RefreshActive()
 end
 
 function GC.UI:Hide()

@@ -74,7 +74,7 @@ local function reasonsText(candidate)
         end
         labels[reason] = true
     end
-    local ordered = { "has_guild", "recently_invited", "recently_declined", "ignored", "wrong_realm", "level_out_of_range" }
+    local ordered = { "banned", "has_guild", "recently_invited", "recently_declined", "ignored", "wrong_realm", "level_out_of_range" }
     local out = {}
     for _, reason in ipairs(ordered) do
         if labels[reason] then out[#out + 1] = reason end
@@ -940,6 +940,9 @@ function IP:_shouldShowCandidate(candidate)
     if hasReason(candidate, "recently_declined") and settings.showRecentlyDeclinedCandidates ~= true then
         return false
     end
+    if hasReason(candidate, "banned") then
+        return false
+    end
     return hasReason(candidate, "has_guild")
         or hasReason(candidate, "recently_invited")
         or hasReason(candidate, "recently_declined")
@@ -1173,6 +1176,7 @@ function IP:_refilterCandidates()
     local history = {
         ignored       = storage and storage.ignored or {},
         recentInvites = storage and storage.recentInvites or {},
+        recentDeclines = storage and storage.recentDeclines or {},
     }
     local filters = GC.Modules.Invite and GC.Modules.Invite.Filters
     for _, c in ipairs(candidates) do
