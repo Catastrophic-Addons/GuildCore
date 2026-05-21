@@ -1,5 +1,6 @@
 -- /GuildCore/UI/EditCharacterPopup.lua
--- Draft-based character management modal. Nothing is applied until Save.
+-- Draft-based character management modal. Field and Main/Alt edits wait for
+-- Save; explicit officer actions run from the Actions tab after confirmation.
 local addonName, ns = ...
 local GC = ns.GuildCore
 
@@ -147,10 +148,6 @@ end
 local function markPendingAction(action, label)
     if not draft then return end
     draft.pendingAction = action
-    draft.pendingActionLabel = label
-    if ECP.pendingActionLabel then
-        ECP.pendingActionLabel:SetText(label and ("Pending: " .. label) or "Pending: none")
-    end
 end
 
 local function makeLabel(parent, text, x, y)
@@ -333,27 +330,34 @@ end
 
 function ECP:_buildActionsPage(page)
     local y = -10
-    y = makeSection(page, "OFFICER ACTIONS", y)
-    self.pendingActionLabel = T().Fs(page, "data", "Pending: none", "textSecond")
-    self.pendingActionLabel:SetPoint("TOPLEFT", page, "TOPLEFT", 12, y)
-    y = y - 34
-
-    self.promoteBtn = GC.UI.Button.Create(page, "Queue Promote", "secondary", 138, T().btnH)
+    y = makeSection(page, "RANK ACTIONS", y)
+    self.promoteBtn = GC.UI.Button.Create(page, "Promote", "success", 138, T().btnH)
     self.promoteBtn:SetPoint("TOPLEFT", page, "TOPLEFT", 12, y)
-    self.promoteBtn:SetScript("OnClick", function() markPendingAction("promote", "Promote") end)
-    self.demoteBtn = GC.UI.Button.Create(page, "Queue Demote", "secondary", 138, T().btnH)
+    self.promoteBtn:SetScript("OnClick", function() ECP:_confirmRankAction("promote") end)
+    self.demoteBtn = GC.UI.Button.Create(page, "Demote", "warning", 138, T().btnH)
     self.demoteBtn:SetPoint("LEFT", self.promoteBtn, "RIGHT", 8, 0)
-    self.demoteBtn:SetScript("OnClick", function() markPendingAction("demote", "Demote") end)
-    self.kickBtn = GC.UI.Button.Create(page, "Queue Kick", "danger", 138, T().btnH)
-    self.kickBtn:SetPoint("LEFT", self.demoteBtn, "RIGHT", 8, 0)
-    self.kickBtn:SetScript("OnClick", function() markPendingAction("kick", "Kick from Guild") end)
+    self.demoteBtn:SetScript("OnClick", function() ECP:_confirmRankAction("demote") end)
+    -- Target-rank dropdowns need safe multi-step macro validation first; the
+    -- operations service currently supports one protected rank jump at a time.
     y = y - 50
 
+    y = makeSection(page, "DANGER ZONE", y)
+    self.dangerHint = T().Fs(page, "tiny", "Danger actions prepare guild removal or moderation changes immediately after confirmation.", "textWarn")
+    self.dangerHint:SetPoint("TOPLEFT", page, "TOPLEFT", 12, y)
+    self.dangerHint:SetPoint("RIGHT", page, "RIGHT", -12, 0)
+    self.dangerHint:SetWordWrap(true)
+    y = y - 30
+    self.kickBtn = GC.UI.Button.Create(page, "Kick", "danger", 138, T().btnH)
+    self.kickBtn:SetPoint("TOPLEFT", page, "TOPLEFT", 12, y)
+    self.kickBtn:SetScript("OnClick", function() ECP:_confirmKick() end)
+    y = y - 58
+
+    y = makeSection(page, "BAN BOOK", y)
     self.banReasonBox = makeInput(page, "Ban Book Reason", 12, y, 500); y = y - 48
-    self.banNotesBox = makeInput(page, "Ban Book Notes", 12, y, 500); y = y - 40
-    self.banBtn = GC.UI.Button.Create(page, "Add to Ban Book on Save", "danger", 190, T().btnH)
+    self.banNotesBox = makeInput(page, "Ban Book Notes", 12, y, 500); y = y - 54
+    self.banBtn = GC.UI.Button.Create(page, "Add to Ban Book", "danger", 190, T().btnH)
     self.banBtn:SetPoint("TOPLEFT", page, "TOPLEFT", 12, y)
-    self.banBtn:SetScript("OnClick", function() markPendingAction("ban", "Add to Ban Book") end)
+    self.banBtn:SetScript("OnClick", function() ECP:_confirmBanBookAdd() end)
     y = y - 54
     page:SetHeight(math.abs(y) + 20)
 end
@@ -361,11 +365,191 @@ end
 function ECP:_buildHistoryPage(page)
     local y = -10
     y = makeSection(page, "ACTIVITY / HISTORY", y)
-    self.historySummary = T().Fs(page, "data", "-", "textSecond")
+    self.historySummary = T().Fs(page, "data", "No history entries found.", "textSecond")
     self.historySummary:SetPoint("TOPLEFT", page, "TOPLEFT", 12, y)
     self.historySummary:SetPoint("RIGHT", page, "RIGHT", -12, 0)
     self.historySummary:SetWordWrap(true)
     page:SetHeight(160)
+end
+
+local function setActionButtonState(button, availability, fallbackReason)
+    if not button then return end
+    availability = availability or {}
+    local enabled = availability.enabled == true
+    button:SetEnabled(enabled)
+    if button.SetTooltip then
+        button:SetTooltip(enabled and nil or "Action unavailable", enabled and nil or (availability.reason or fallbackReason))
+    end
+end
+
+function ECP:_refreshOfficerActionViews(live)
+    live = live or ensureLivePlayer()
+    local operations = GC.Services and GC.Services.Operations
+    local availability = operations and operations.GetActionAvailability and operations:GetActionAvailability(live) or {
+        promote = { enabled = false, reason = "Operations service is unavailable." },
+        demote = { enabled = false, reason = "Operations service is unavailable." },
+        kick = { enabled = false, reason = "Operations service is unavailable." },
+    }
+    setActionButtonState(self.promoteBtn, availability.promote, "Promotion is unavailable.")
+    setActionButtonState(self.demoteBtn, availability.demote, "Demotion is unavailable.")
+    setActionButtonState(self.kickBtn, availability.kick, "Guild removal is unavailable.")
+
+    local canModerate = GC.Permissions and GC.Permissions.IsOfficerOrBetter and GC.Permissions:IsOfficerOrBetter()
+    setActionButtonState(self.banBtn, {
+        enabled = canModerate and live ~= nil and GC.BanBook ~= nil,
+        reason = not canModerate and "Officer permission required." or "Ban Book is unavailable.",
+    }, "Ban Book is unavailable.")
+end
+
+function ECP:_refreshAfterOfficerAction(options)
+    options = options or {}
+    if options.scan and GS() and GS().TriggerScan then
+        GS():TriggerScan()
+    end
+    if GC.UI and GC.UI.PlayerPanel and GC.UI.PlayerPanel.Refresh then
+        GC.UI.PlayerPanel:Refresh()
+    end
+    if GC.UI and GC.UI.RosterPanel and GC.UI.RosterPanel.Refresh then
+        GC.UI.RosterPanel:Refresh()
+    end
+    if GC.UI and GC.UI.Dashboard and GC.UI.Dashboard.Refresh then
+        GC.UI.Dashboard:Refresh()
+    end
+    if GC.UI and GC.UI.LogPanel and GC.UI.LogPanel.Refresh then
+        GC.UI.LogPanel:Refresh()
+    end
+    if GC.UI and GC.UI.BanBookPanel and GC.UI.BanBookPanel.Refresh then
+        GC.UI.BanBookPanel:Refresh()
+    end
+    if GC.UI and GC.UI.PurgePanel and GC.UI.PurgePanel.Refresh then
+        GC.UI.PurgePanel:Refresh()
+    end
+    self:_refreshOfficerActionViews(ensureLivePlayer())
+    self:_refreshHistory(ensureLivePlayer())
+end
+
+function ECP:_confirmRankAction(action)
+    local live = ensureLivePlayer()
+    local operations = GC.Services and GC.Services.Operations
+    if not live or not operations then
+        status("Rank action is unavailable.", "textDanger")
+        return
+    end
+
+    local isPromote = action == "promote"
+    local verb = isPromote and "Promote" or "Demote"
+    local availability = operations:GetActionAvailability(live)
+    local allowed = availability and availability[action]
+    if not allowed or not allowed.enabled then
+        status((allowed and allowed.reason) or (verb .. " is unavailable."), "textDanger")
+        self:_refreshOfficerActionViews(live)
+        return
+    end
+
+    -- WoW's supported rank path is a protected one-step /gpromote or
+    -- /gdemote macro. A target-rank dropdown needs safe multi-step macro
+    -- validation before it can be offered here.
+    showConfirm("GUILDCORE_EDIT_CHARACTER_RANK_ACTION", verb .. " " .. tostring(live.key or live.name) .. "?", function()
+        local ok, message
+        if isPromote then
+            ok, message = operations:Promote(live)
+        else
+            ok, message = operations:Demote(live)
+        end
+        if ok then
+            status(string.format("%s ready for %s. %s", verb, tostring(live.key or live.name), tostring(message or "Use the guild action hotkey to execute.")), "textWarn")
+            ECP:_refreshAfterOfficerAction()
+        else
+            status(message or (verb .. " could not be prepared."), "textDanger")
+            ECP:_refreshOfficerActionViews(live)
+        end
+    end)
+end
+
+function ECP:_confirmKick()
+    local live = ensureLivePlayer()
+    local operations = GC.Services and GC.Services.Operations
+    if not live or not operations then
+        status("Guild removal is unavailable.", "textDanger")
+        return
+    end
+
+    local availability = operations:GetActionAvailability(live)
+    if not availability or not availability.kick or not availability.kick.enabled then
+        status((availability and availability.kick and availability.kick.reason) or "Guild removal is unavailable.", "textDanger")
+        self:_refreshOfficerActionViews(live)
+        return
+    end
+
+    showConfirm("GUILDCORE_EDIT_CHARACTER_KICK", "Kick " .. tostring(live.key or live.name) .. " from the guild?", function()
+        local ok, message = operations:Kick(live)
+        if ok then
+            status("Kick queued for " .. tostring(live.key or live.name) .. ". " .. tostring(message or "Build and execute the guild removal action."), "textWarn")
+            ECP:_refreshAfterOfficerAction()
+        else
+            status(message or "Unable to prepare guild removal.", "textDanger")
+            ECP:_refreshOfficerActionViews(live)
+        end
+    end)
+end
+
+function ECP:_confirmBanBookAdd()
+    local live = ensureLivePlayer()
+    if not live or not GC.BanBook then
+        status("Ban Book is unavailable.", "textDanger")
+        return
+    end
+    if not (GC.Permissions and GC.Permissions.IsOfficerOrBetter and GC.Permissions:IsOfficerOrBetter()) then
+        status("Officer permission required.", "textDanger")
+        self:_refreshOfficerActionViews(live)
+        return
+    end
+
+    local reason = trim(self.banReasonBox and self.banReasonBox:GetText() or "")
+    local notes = self.banNotesBox and self.banNotesBox:GetText() or ""
+    if reason == "" then
+        status("Ban Book reason is required.", "textDanger")
+        return
+    end
+
+    showConfirm("GUILDCORE_EDIT_CHARACTER_BAN", "Add " .. tostring(live.key or live.name) .. " to Ban Book?", function()
+        local ok, entryOrError, updated = GC.BanBook:Add(live.name, live.realm, reason, notes)
+        if not ok then
+            status(entryOrError or "Unable to add Ban Book entry.", "textDanger")
+            return
+        end
+        if DS() and DS().AppendLog then
+            DS():AppendLog({
+                timestamp = GC.Utils and GC.Utils.Now and GC.Utils.Now() or time(),
+                event = "BAN_BOOK",
+                playerKey = live.key,
+                oldValue = updated and "existing" or nil,
+                newValue = entryOrError and entryOrError.key or live.key,
+                reason = reason,
+            })
+        end
+        status((updated and "Ban Book entry updated for " or "Added to Ban Book: ") .. tostring(entryOrError.key or live.key or live.name), "textSuccess")
+        ECP:_refreshAfterOfficerAction()
+    end)
+end
+
+function ECP:_refreshHistory(live)
+    if not self.historySummary then return end
+    live = live or ensureLivePlayer()
+    if not live or not GS() or not GS().GetRecentLogs then
+        self.historySummary:SetText("No history entries found.")
+        return
+    end
+
+    local lines = {}
+    for _, entry in ipairs(GS():GetRecentLogs(250) or {}) do
+        if entry and entry.playerKey == live.key then
+            local when = tonumber(entry.timestamp) and date("%Y-%m-%d %H:%M", entry.timestamp) or "Unknown time"
+            lines[#lines + 1] = string.format("%s  %s%s", when, tostring(entry.event or "EVENT"), entry.reason and ("  " .. tostring(entry.reason)) or "")
+            if #lines >= 8 then break end
+        end
+    end
+    self.historySummary:SetText(#lines > 0 and table.concat(lines, "\n") or "No history entries found.")
 end
 
 function ECP:_setAddAltValidation(message)
@@ -641,12 +825,6 @@ function ECP:_queueRemoveLinkedAlt(altKey)
 
     draft.removeAltKeys = draft.removeAltKeys or {}
     draft.removeAltKeys[altKey] = true
-    if not draft.pendingAction then
-        draft.pendingActionLabel = "Remove Alt Link"
-        if self.pendingActionLabel then
-            self.pendingActionLabel:SetText("Pending: Remove Alt Link")
-        end
-    end
     self:_refreshAltDisplay(ensureLivePlayer())
     status("Queued alt link removal. Click Save to apply.", "textWarn")
 end
@@ -748,7 +926,13 @@ function ECP:_getLinkedAltRow(index)
         local altKey = self._altKey
         if not altKey then return end
         if button == "RightButton" then
-            ECP:_showLinkedAltMenu(altKey)
+            local player = activeRosterPlayer(altKey)
+            if GC.UI and GC.UI.CharacterContextMenu and player then
+                player.source = "Edit Character Linked Alts"
+                GC.UI.CharacterContextMenu:Open(player)
+            else
+                ECP:_showLinkedAltMenu(altKey)
+            end
         else
             ECP:_openLinkedAlt(altKey)
         end
@@ -998,20 +1182,8 @@ function ECP:Open(player)
     markPendingAction(nil, nil)
 
     self:_refreshAltDisplay(live)
-    self.historySummary:SetText(string.format(
-        "First seen: %s\nLast seen: %s\nRank: %s\nLocation: %s",
-        dateText(live.firstSeenAt) ~= "" and dateText(live.firstSeenAt) or "-",
-        dateText(live.lastSeenAt) ~= "" and dateText(live.lastSeenAt) or "-",
-        live.rankName or "-",
-        live.zone or "-"
-    ))
-
-    local availability = GC.Services.Operations and GC.Services.Operations:GetActionAvailability(live) or nil
-    if availability then
-        self.promoteBtn:SetEnabled(availability.promote.enabled)
-        self.demoteBtn:SetEnabled(availability.demote.enabled)
-        self.kickBtn:SetEnabled(availability.kick.enabled)
-    end
+    self:_refreshHistory(live)
+    self:_refreshOfficerActionViews(live)
 
     self.frame:Show()
     self:_setTab("general")
@@ -1121,16 +1293,6 @@ function ECP:_applyPendingAction(live)
             end
         end
         return true
-    elseif action == "promote" then
-        return GC.Services.Operations:Promote(live)
-    elseif action == "demote" then
-        return GC.Services.Operations:Demote(live)
-    elseif action == "kick" then
-        return GC.Services.Operations:Kick(live)
-    elseif action == "ban" then
-        local reason = trim(self.banReasonBox:GetText() or "")
-        if reason == "" then return false, "Ban Book reason is required." end
-        return GC.BanBook:Add(live.name, live.realm, reason, self.banNotesBox:GetText() or "")
     end
     return true
 end
@@ -1158,10 +1320,6 @@ function ECP:Save()
     local action = draft and draft.pendingAction
     local hasAltRemovals = self:_hasQueuedAltRemovals()
     local hasAltAdds = self:_hasQueuedAltAdds()
-    if action == "promote" or action == "demote" or action == "kick" or action == "ban" then
-        showConfirm("GUILDCORE_EDIT_CHARACTER_DANGER", "Apply pending officer action for " .. tostring(live.key or live.name) .. "?", applyAll)
-        return
-    end
     if action == "addAlt" then
         local mainKey = draft and draft.mainOverride or live.key
         local count = draft and draft.addAltOrder and #draft.addAltOrder or 0

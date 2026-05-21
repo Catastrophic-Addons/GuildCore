@@ -370,3 +370,18 @@ function BP:Refresh()
     if BB() and BB().Init then BB():Init() end
     self:_refreshList()
 end
+
+function BP:FocusEntry(key)
+    if not self.frame or not key then return false end
+    local entry = BB() and BB():GetEntry(key) or nil
+    if not entry then return false end
+    if self.searchBox then self.searchBox:SetText("") end
+    if self.realmFilterBox then self.realmFilterBox:SetText("") end
+    if self.activeOnlyBtn then
+        self.activeOnlyBtn._showActiveOnly = false
+        self.activeOnlyBtn:SetLabel("Active Only")
+    end
+    self:_populateForm(entry)
+    self:_refreshList(true)
+    return true
+end

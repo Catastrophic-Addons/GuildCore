@@ -154,6 +154,13 @@ function PP:Create(parent)
     header:SetHeight(122)
     Th.Bg(header, Th.c.chrome, Th.c.border)
     self.header = header
+    if GC.UI and GC.UI.CharacterContextMenu then
+        GC.UI.CharacterContextMenu:Attach(header, function()
+            local player = getLivePlayer()
+            if player then player.source = "Profile" end
+            return player
+        end)
+    end
 
     local portrait = CreateFrame("Frame", nil, header)
     portrait:SetSize(58, 58)

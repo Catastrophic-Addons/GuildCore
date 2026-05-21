@@ -15,6 +15,7 @@ local function theme() T = T or GC.UI.Theme; return T end
 local TYPE_COLORS = {
     primary = {"btnPrimary", "btnPrimHov"},
     secondary = {"btnSecond", "btnSecHov"},
+    warning = {"statusWarn", "statusWarn"},
     danger  = {"btnDanger",  "btnDanHov"},
     success = {"btnSuccess", "btnSucHov"},
 }
@@ -22,7 +23,7 @@ local TYPE_COLORS = {
 -- Create a fully styled button.
 -- @param parent  Parent frame
 -- @param label   Button text
--- @param bType   "primary" | "secondary" | "danger" | "success"
+-- @param bType   "primary" | "secondary" | "warning" | "danger" | "success"
 -- @param w, h    Dimensions (optional, defaults 120×24)
 -- @returns button frame with :SetLabel(), :SetEnabled()
 local function createStyledButton(parent, label, bType, w, h, template)

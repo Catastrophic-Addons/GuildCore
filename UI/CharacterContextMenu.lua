@@ -59,6 +59,23 @@ local function normalizeCharacterData(data)
     return data
 end
 
+function CCM:NormalizeCharacterData(data)
+    return normalizeCharacterData(data)
+end
+
+function CCM:ValidateCharacterData(data, actionId)
+    data = normalizeCharacterData(data)
+    if not data.key or data.key == "" then
+        if GC.Debug then GC:Debug("Character context action blocked: missing character key", tostring(actionId or "unknown")) end
+        return nil, "Character key is unavailable."
+    end
+    if not data.name or data.name == "" or data.name == "Unknown" then
+        if GC.Debug then GC:Debug("Character context action blocked: missing character name", tostring(actionId or "unknown"), tostring(data.key)) end
+        return nil, "Character name is unavailable."
+    end
+    return data
+end
+
 local function status(message, colorKey)
     if GC.UI and GC.UI.MainFrame and GC.UI.MainFrame.SetStatus then
         GC.UI.MainFrame:SetStatus(message, colorKey)
@@ -124,17 +141,36 @@ end
 
 local function openCopyText(text)
     text = tostring(text or "")
-    if ChatFrame_OpenChat then
-        ChatFrame_OpenChat(text)
-        return
+    if text == "" then return end
+    local dialog = CCM.copyDialog
+    local Th = T()
+    if not dialog then
+        dialog = CreateFrame("Frame", "GuildCoreCharacterCopyDialog", UIParent)
+        dialog:SetSize(360, 108)
+        if GC.UI.Layering then
+            GC.UI.Layering:ApplyPopup(dialog, GC.UI.MainFrame and GC.UI.MainFrame.frame, 80)
+        else
+            dialog:SetFrameStrata("DIALOG")
+        end
+        dialog:SetClampedToScreen(true)
+        Th.Bg(dialog, Th.c.panel, Th.c.borderAccent)
+        dialog.title = Th.Fs(dialog, "subheader", "Copy Character Name", "textAccent")
+        dialog.title:SetPoint("TOPLEFT", dialog, "TOPLEFT", 12, -10)
+        dialog.input = GC.UI.Panel.Input(dialog, 334, Th.inputH)
+        dialog.input:SetPoint("TOPLEFT", dialog, "TOPLEFT", 12, -42)
+        dialog.input:SetAutoFocus(false)
+        dialog.close = GC.UI.Button.Create(dialog, "Close", "secondary", 72, Th.btnH)
+        dialog.close:SetPoint("BOTTOMRIGHT", dialog, "BOTTOMRIGHT", -12, 12)
+        dialog.close:SetScript("OnClick", function() dialog:Hide() end)
+        dialog:Hide()
+        CCM.copyDialog = dialog
     end
-    if DEFAULT_CHAT_FRAME and DEFAULT_CHAT_FRAME.editBox then
-        DEFAULT_CHAT_FRAME.editBox:SetText(text)
-        DEFAULT_CHAT_FRAME.editBox:HighlightText()
-        DEFAULT_CHAT_FRAME.editBox:Show()
-        return
-    end
-    status(text, "textDimmed")
+    dialog.input:SetText(text)
+    dialog.input:SetFocus()
+    dialog.input:HighlightText()
+    dialog:ClearAllPoints()
+    dialog:SetPoint("CENTER", UIParent, "CENTER", 0, 80)
+    dialog:Show()
 end
 
 function CCM:Close()
@@ -169,8 +205,8 @@ function CCM:_ensureFrames()
     local catcher = CreateFrame("Button", CATCHER_NAME, UIParent)
     catcher:SetAllPoints(UIParent)
     catcher:EnableMouse(true)
-    catcher:SetFrameStrata("DIALOG")
-    catcher:SetFrameLevel(180)
+    catcher:SetFrameStrata("FULLSCREEN_DIALOG")
+    catcher:SetFrameLevel(240)
     catcher:SetAlpha(0)
     catcher:Hide()
     catcher:SetScript("OnClick", function() CCM:Close() end)
@@ -178,13 +214,12 @@ function CCM:_ensureFrames()
 
     local menu = CreateFrame("Frame", MENU_NAME, UIParent)
     menu:SetSize(224, 320)
-    if GC.UI.Layering then
-        GC.UI.Layering:ApplyPopup(menu, GC.UI.MainFrame and GC.UI.MainFrame.frame, 60)
-    else
-        menu:SetFrameStrata("DIALOG")
-        menu:SetFrameLevel(220)
-    end
+    -- Keep this above the invisible dismiss catcher. The catcher used to sit
+    -- over menu rows after the shared popup helper picked a lower frame level.
+    menu:SetFrameStrata("FULLSCREEN_DIALOG")
+    menu:SetFrameLevel(260)
     menu:EnableMouse(true)
+    menu:SetClampedToScreen(true)
     menu:Hide()
     Th.Bg(menu, Th.c.panelAlt, Th.c.borderAccent)
     self.menu = menu
@@ -204,6 +239,9 @@ function CCM:_getRow(index)
     if row then return row end
     local Th = T()
     row = CreateFrame("Button", nil, self.menu)
+    row:EnableMouse(true)
+    row:RegisterForClicks("LeftButtonUp")
+    row:SetFrameLevel((self.menu:GetFrameLevel() or 260) + 2)
     row:SetHeight(22)
     row:SetPoint("TOPLEFT", self.menu, "TOPLEFT", 6, -30 - ((index - 1) * 24))
     row:SetPoint("TOPRIGHT", self.menu, "TOPRIGHT", -6, -30 - ((index - 1) * 24))
@@ -270,8 +308,13 @@ function CCM:_addItem(index, item)
             return
         end
         debugLine("Context action selected:", item.label, self.current and self.current.displayName)
+        local current = self.current
         self:Close()
-        if item.onClick then item.onClick() end
+        if item.actionId then
+            self:RunAction(item.actionId, current)
+        elseif item.onClick then
+            item.onClick()
+        end
     end)
     row:Show()
 end
@@ -392,16 +435,18 @@ function CCM:_showBanDialog(data)
             status("Ban Book reason is required.", "textWarn")
             return
         end
-        local ok, entryOrErr = GC.BanBook:Add(data.name, data.realm, reason, dialog.notes:GetText() or "")
-        if ok then
-            status("Ban Book entry added for " .. tostring(entryOrErr.key or data.displayName) .. ".", "textWarn")
-            if GC.UI and GC.UI.BanBookPanel and GC.UI.BanBookPanel.Refresh then
-                GC.UI.BanBookPanel:Refresh()
+        confirm("GUILDCORE_CONTEXT_ADD_BAN", "Add " .. tostring(data.displayName) .. " to Ban Book?", function()
+            local ok, entryOrErr = GC.BanBook:Add(data.name, data.realm, reason, dialog.notes:GetText() or "")
+            if ok then
+                status("Ban Book entry added for " .. tostring(entryOrErr.key or data.displayName) .. ".", "textWarn")
+                if GC.UI and GC.UI.BanBookPanel and GC.UI.BanBookPanel.Refresh then
+                    GC.UI.BanBookPanel:Refresh()
+                end
+                dialog:Hide()
+            else
+                status(entryOrErr or "Unable to add Ban Book entry.", "textDanger")
             end
-            dialog:Hide()
-        else
-            status(entryOrErr or "Unable to add Ban Book entry.", "textDanger")
-        end
+        end)
     end)
     dialog:ClearAllPoints()
     dialog:SetPoint("CENTER", UIParent, "CENTER", 0, 80)
@@ -471,6 +516,150 @@ local function safePlayerAction(data, action, fn)
     end
 end
 
+local function refreshCharacterViews()
+    if GC.UI and GC.UI.PlayerPanel and GC.UI.PlayerPanel.Refresh then GC.UI.PlayerPanel:Refresh() end
+    if GC.UI and GC.UI.RosterPanel and GC.UI.RosterPanel.Refresh then GC.UI.RosterPanel:Refresh() end
+    if GC.UI and GC.UI.Dashboard and GC.UI.Dashboard.Refresh then GC.UI.Dashboard:Refresh() end
+    if GC.UI and GC.UI.LogPanel and GC.UI.LogPanel.Refresh then GC.UI.LogPanel:Refresh() end
+    if GC.UI and GC.UI.BanBookPanel and GC.UI.BanBookPanel.Refresh then GC.UI.BanBookPanel:Refresh() end
+    if GC.UI and GC.UI.PurgePanel and GC.UI.PurgePanel.Refresh then GC.UI.PurgePanel:Refresh() end
+end
+
+local function openEditCharacterTab(data, tab)
+    local popup = GC.UI and GC.UI.EditCharacterPopup
+    local live = data and data.key and GC.Services.DataStore:GetPlayer(data.key) or data
+    if not popup or not live then
+        return false, "Edit Character is unavailable."
+    end
+    popup:Open(live)
+    if tab and popup._setTab then
+        popup:_setTab(tab)
+    end
+    return true
+end
+
+function CCM:RunAction(actionId, characterData)
+    local data, err = self:ValidateCharacterData(characterData, actionId)
+    if not data then
+        status(err or "Character action is unavailable.", "textWarn")
+        return false, err
+    end
+
+    local function rankAction(label, fn)
+        confirm("GUILDCORE_CONTEXT_" .. string.upper(actionId), label .. " " .. tostring(data.displayName) .. "?", function()
+            safePlayerAction(data, label, fn)
+            refreshCharacterViews()
+        end)
+        return true
+    end
+
+    if actionId == "edit_character" then
+        local ok, message = openEditCharacterTab(data)
+        if not ok then status(message, "textWarn") end
+        return ok, message
+    elseif actionId == "open_roster_entry" then
+        local ok, message = focusRoster(data)
+        if not ok then status(message or "Roster entry unavailable.", "textWarn") end
+        return ok, message
+    elseif actionId == "whisper" then
+        local ok, message = GC.Services.GuildService:OpenWhisper(data.key)
+        status(ok and ("Opening whisper to " .. tostring(data.name) .. ".") or (message or "Unable to whisper."), ok and "textSuccess" or "textDanger")
+        return ok, message
+    elseif actionId == "invite_group" then
+        local ok, message = GC.Services.GuildService:InviteToParty(data.key)
+        status(ok and ("Party invite sent to " .. tostring(data.name) .. ".") or (message or "Unable to invite."), ok and "textSuccess" or "textDanger")
+        return ok, message
+    elseif actionId == "inspect" then
+        if InspectUnit then InspectUnit(data.name) end
+        return true
+    elseif actionId == "copy_name" then
+        openCopyText(data.name)
+        return true
+    elseif actionId == "copy_name_realm" then
+        openCopyText(data.displayName or data.key)
+        return true
+    elseif actionId == "edit_public_note" then
+        self:_showTextDialog("public", data)
+        return true
+    elseif actionId == "edit_officer_note" then
+        self:_showTextDialog("officer", data)
+        return true
+    elseif actionId == "promote" then
+        return rankAction("Promote", function() return GC.Services.Operations:Promote(data) end)
+    elseif actionId == "demote" then
+        return rankAction("Demote", function() return GC.Services.Operations:Demote(data) end)
+    elseif actionId == "kick" then
+        confirm("GUILDCORE_CONTEXT_KICK", "Kick " .. tostring(data.displayName) .. " from the guild?", function()
+            safePlayerAction(data, "Kick", function() return GC.Services.Operations:Kick(data) end)
+            refreshCharacterViews()
+        end)
+        return true
+    elseif actionId == "add_to_ban_book" then
+        self:_showBanDialog(data)
+        return true
+    elseif actionId == "view_ban_entry" then
+        if GC.UI and GC.UI.SetActivePanel then GC.UI:SetActivePanel("banbook") end
+        if GC.UI and GC.UI.BanBookPanel and GC.UI.BanBookPanel.FocusEntry then
+            GC.UI.BanBookPanel:FocusEntry(data.key)
+        end
+        status("Ban Book entry: " .. tostring(data.displayName), "textWarn")
+        return true
+    elseif actionId == "remove_from_ban_book" then
+        confirm("GUILDCORE_CONTEXT_REMOVE_BAN", "Remove " .. tostring(data.displayName) .. " from Ban Book?", function()
+            local ok, message = GC.BanBook:Remove(data.key)
+            status(ok and ("Removed from Ban Book: " .. tostring(data.displayName)) or (message or "Unable to remove Ban Book entry."), ok and "textWarn" or "textDanger")
+            refreshCharacterViews()
+        end)
+        return true
+    elseif actionId == "view_alts" or actionId == "mark_alt" then
+        local ok, message = openEditCharacterTab(data, "alts")
+        if not ok then status(message, "textWarn") end
+        return ok, message
+    elseif actionId == "mark_main" then
+        confirm("GUILDCORE_CONTEXT_MAIN", "Mark " .. tostring(data.displayName) .. " as a main character?", function()
+            local ok, message = GC.Services.Alts:SetMain(data.key, "context-menu")
+            status(ok and "Character marked as Main." or (message or "Unable to mark Main."), ok and "textSuccess" or "textDanger")
+            if ok then focusRoster(data); refreshCharacterViews() end
+        end)
+        return true
+    elseif actionId == "mark_unknown" then
+        confirm("GUILDCORE_CONTEXT_UNKNOWN", "Mark " .. tostring(data.displayName) .. " as Unknown and clear its current alt link if present?", function()
+            local ok, message = GC.Services.Alts:SetUnknown(data.key, "context-menu")
+            status(ok and "Character marked as Unknown." or (message or "Unable to mark Unknown."), ok and "textWarn" or "textDanger")
+            if ok then focusRoster(data); refreshCharacterViews() end
+        end)
+        return true
+    elseif actionId == "add_discord_verification" then
+        local ok, message = openEditCharacterTab(data, "general")
+        if ok then status("Discord fields are available in Edit Character.", "textDimmed") else status(message, "textWarn") end
+        return ok, message
+    elseif actionId == "remove_discord_verification" then
+        confirm("GUILDCORE_CONTEXT_REMOVE_DISCORD", "Open Edit Character to remove Discord verification for " .. tostring(data.displayName) .. "?", function()
+            local ok, message = openEditCharacterTab(data, "general")
+            if ok then status("Update Discord verification in Edit Character.", "textWarn") else status(message, "textWarn") end
+        end)
+        return true
+    elseif actionId == "view_activity_history" then
+        if GC.UI and GC.UI.SetActivePanel then GC.UI:SetActivePanel("log") end
+        if GC.UI and GC.UI.LogPanel and GC.UI.LogPanel.FocusCharacter then
+            GC.UI.LogPanel:FocusCharacter(data.key)
+            return true
+        end
+        status("Activity history is unavailable.", "textWarn")
+        return false, "Activity history is unavailable."
+    elseif actionId == "refresh_character" then
+        local ok, message = GC.Services.GuildService:TriggerScan()
+        status(ok and "Roster refresh requested." or (message or "Unable to refresh roster."), ok and "textWarn" or "textDanger")
+        return ok, message
+    elseif actionId == "cancel" then
+        return true
+    end
+
+    debugLine("Context action unavailable:", tostring(actionId), tostring(data.displayName))
+    status("Not implemented yet.", "textWarn")
+    return false, "Not implemented yet."
+end
+
 function CCM:_buildItems(data)
     local items = {}
     local function item(def) items[#items + 1] = def end
@@ -480,81 +669,41 @@ function CCM:_buildItems(data)
     local isOfficer = GC.Permissions and GC.Permissions.IsOfficerOrBetter and GC.Permissions:IsOfficerOrBetter()
     local banned, banEntry = GC.BanBook and GC.BanBook.IsBanned and GC.BanBook:IsBanned(data.name, data.realm)
 
-    item({ label = "Whisper", enabled = data.isOnline == true, reason = "Character is offline.", onClick = function()
-        local ok, err = GC.Services.GuildService:OpenWhisper(data.key)
-        status(ok and ("Opening whisper to " .. data.name .. ".") or (err or "Unable to whisper."), ok and "textSuccess" or "textDanger")
-    end })
-    item({ label = "Edit Character", enabled = data.key ~= nil and GC.UI.EditCharacterPopup ~= nil, reason = "Character profile is unavailable.", onClick = function()
-        local live = GC.Services.DataStore:GetPlayer(data.key) or data
-        GC.UI.EditCharacterPopup:Open(live)
-    end })
-    item({ label = "Invite to Group", enabled = data.isOnline == true, reason = "Character is offline.", onClick = function()
-        local ok, err = GC.Services.GuildService:InviteToParty(data.key)
-        status(ok and ("Party invite sent to " .. data.name .. ".") or (err or "Unable to invite."), ok and "textSuccess" or "textDanger")
-    end })
-    item({ label = "Open Roster Entry", enabled = data.key ~= nil, onClick = function() local ok, err = focusRoster(data); if not ok then status(err, "textWarn") end end })
-    item({ label = "Copy Name", onClick = function() openCopyText(data.name or "") end })
-    item({ label = "Copy Name-Realm", onClick = function() openCopyText(data.displayName or data.name or "") end })
+    item({ label = "Whisper", actionId = "whisper", enabled = data.isOnline == true, reason = "Character is offline." })
+    item({ label = "Edit Character", actionId = "edit_character", enabled = data.key ~= nil and GC.UI.EditCharacterPopup ~= nil, reason = "Character profile is unavailable." })
+    item({ label = "Invite to Group", actionId = "invite_group", enabled = data.isOnline == true, reason = "Character is offline." })
+    item({ label = "Open Roster Entry", actionId = "open_roster_entry", enabled = data.key ~= nil, reason = "Character key is unavailable." })
+    item({ label = "Copy Name", actionId = "copy_name" })
+    item({ label = "Copy Name-Realm", actionId = "copy_name_realm" })
     local canInspect = InspectUnit ~= nil and UnitExists and UnitExists(data.name or "") and (not CanInspect or CanInspect(data.name or ""))
-    item({ label = "Inspect", enabled = canInspect == true, reason = "Inspect requires an available nearby unit token.", onClick = function()
-        if InspectUnit then InspectUnit(data.name) end
-    end })
+    item({ label = "Inspect", actionId = "inspect", enabled = canInspect == true, reason = "Inspect requires the character to be nearby or targeted." })
     sep()
 
-    item({ label = "Edit Public Note", enabled = isOfficer, reason = "Officer permission required.", onClick = function() self:_showTextDialog("public", data) end })
-    item({ label = "Edit Officer Note", enabled = isOfficer, reason = "Officer permission required.", onClick = function() self:_showTextDialog("officer", data) end })
+    item({ label = "Edit Public Note", actionId = "edit_public_note", enabled = isOfficer, reason = "Officer permission required." })
+    item({ label = "Edit Officer Note", actionId = "edit_officer_note", enabled = isOfficer, reason = "Officer permission required." })
     sep()
 
-    item({ label = "Promote", enabled = availability.promote and availability.promote.enabled, reason = availability.promote and availability.promote.reason, onClick = function()
-        confirm("GUILDCORE_CONTEXT_PROMOTE", "Promote " .. tostring(data.displayName) .. "?", function()
-            safePlayerAction(data, "Promote", function() return GC.Services.Operations:Promote(data) end)
-        end)
-    end })
-    item({ label = "Demote", enabled = availability.demote and availability.demote.enabled, reason = availability.demote and availability.demote.reason, onClick = function()
-        confirm("GUILDCORE_CONTEXT_DEMOTE", "Demote " .. tostring(data.displayName) .. "?", function()
-            safePlayerAction(data, "Demote", function() return GC.Services.Operations:Demote(data) end)
-        end)
-    end })
-    item({ label = "Kick from Guild", danger = true, enabled = availability.kick and availability.kick.enabled, reason = availability.kick and availability.kick.reason, onClick = function()
-        confirm("GUILDCORE_CONTEXT_KICK", "Are you sure you want to kick " .. tostring(data.displayName) .. " from the guild?", function()
-            safePlayerAction(data, "Kick", function() return GC.Services.Operations:Kick(data) end)
-            if GC.UI and GC.UI.PurgePanel and GC.UI.PurgePanel.Refresh then GC.UI.PurgePanel:Refresh() end
-        end)
-    end })
+    item({ label = "Promote", actionId = "promote", enabled = availability.promote and availability.promote.enabled, reason = availability.promote and availability.promote.reason })
+    item({ label = "Demote", actionId = "demote", enabled = availability.demote and availability.demote.enabled, reason = availability.demote and availability.demote.reason })
+    item({ label = "Kick from Guild", actionId = "kick", danger = true, enabled = availability.kick and availability.kick.enabled, reason = availability.kick and availability.kick.reason })
     sep()
 
-    item({ label = "View Alts", enabled = data.key ~= nil, onClick = function()
-        local ok, err = focusRoster(data)
-        if ok and GC.UI and GC.UI.MainFrame then
-            GC.UI.MainFrame:SetStatus("Alts are shown in the roster detail panel.", "textDimmed")
-        elseif err then
-            status(err, "textWarn")
-        end
-    end })
-    item({ label = "Mark as Main", enabled = data.key ~= nil, onClick = function()
-        confirm("GUILDCORE_CONTEXT_MAIN", "Mark " .. tostring(data.displayName) .. " as a main character?", function()
-            local ok, err = GC.Services.Alts:SetMain(data.key, "context-menu")
-            status(ok and "Character marked as Main." or (err or "Unable to mark Main."), ok and "textSuccess" or "textDanger")
-            if ok then focusRoster(data) end
-        end)
-    end })
-    item({ label = "Mark as Alt", enabled = data.key ~= nil, onClick = function() self:_showMainDialog(data) end })
+    item({ label = "View Alts", actionId = "view_alts", enabled = data.key ~= nil, reason = "Character key is unavailable." })
+    item({ label = "Mark as Main", actionId = "mark_main", enabled = data.key ~= nil, reason = "Character key is unavailable." })
+    item({ label = "Mark as Alt", actionId = "mark_alt", enabled = data.key ~= nil, reason = "Character key is unavailable." })
+    item({ label = "Mark Unknown", actionId = "mark_unknown", enabled = data.key ~= nil and data.classification ~= "unknown", reason = data.classification == "unknown" and "Character is already Unknown." or "Character key is unavailable." })
+    item({ label = "View Activity History", actionId = "view_activity_history", enabled = data.key ~= nil, reason = "Character key is unavailable." })
     sep()
 
     if banned then
         item({ label = "Already in Ban Book", enabled = false, reason = "This character is already listed in Ban Book." })
-        item({ label = "View Ban Entry", onClick = function()
-            if GC.UI and GC.UI.SetActivePanel then GC.UI:SetActivePanel("banbook") end
-            status("Ban Book entry: " .. tostring(banEntry and banEntry.key or data.displayName), "textWarn")
-        end })
+        item({ label = "View Ban Entry", actionId = "view_ban_entry" })
+        item({ label = "Remove from Ban Book", actionId = "remove_from_ban_book", danger = true, enabled = isOfficer, reason = "Officer permission required." })
     else
-        item({ label = "Add to Ban Book", danger = true, enabled = isOfficer, reason = "Officer permission required.", onClick = function() self:_showBanDialog(data) end })
+        item({ label = "Add to Ban Book", actionId = "add_to_ban_book", danger = true, enabled = isOfficer, reason = "Officer permission required." })
     end
-    item({ label = "Refresh Character", onClick = function()
-        local ok, err = GC.Services.GuildService:TriggerScan()
-        status(ok and "Roster refresh requested." or (err or "Unable to refresh roster."), ok and "textWarn" or "textDanger")
-    end })
-    item({ label = "Cancel", onClick = function() end })
+    item({ label = "Refresh Character", actionId = "refresh_character" })
+    item({ label = "Cancel", actionId = "cancel" })
 
     return items
 end
@@ -581,12 +730,27 @@ function CCM:Open(data)
     end
     self.menu:SetHeight(36 + (rowIndex * 24))
     anchorNearCursor(self.menu)
+    debugLine(
+        "Character context menu frame:",
+        tostring(self.menu:GetFrameStrata()),
+        tostring(self.menu:GetFrameLevel()),
+        "catcher:",
+        tostring(self.catcher:GetFrameStrata()),
+        tostring(self.catcher:GetFrameLevel()),
+        "rows:",
+        tostring(rowIndex)
+    )
     self.catcher:Show()
     self.menu:Show()
 end
 
 function CCM:Attach(frame, characterDataProvider)
     if not frame then return false end
+    frame._guildCoreCharacterContextProvider = characterDataProvider
+    if frame._guildCoreCharacterContextAttached then
+        return true
+    end
+    frame._guildCoreCharacterContextAttached = true
     frame:EnableMouse(true)
     local objectType = frame.GetObjectType and frame:GetObjectType() or ""
     local isButton = objectType == "Button" or objectType == "CheckButton"
@@ -598,7 +762,8 @@ function CCM:Attach(frame, characterDataProvider)
     if isButton then
         frame:SetScript("OnClick", function(self, button, ...)
             if button == "RightButton" then
-                local data = characterDataProvider and characterDataProvider(self) or nil
+                local provider = self._guildCoreCharacterContextProvider
+                local data = provider and provider(self) or nil
                 CCM:Open(data)
                 return
             end
@@ -607,7 +772,8 @@ function CCM:Attach(frame, characterDataProvider)
     end
     frame:SetScript("OnMouseUp", function(self, button, ...)
         if button == "RightButton" and not isButton then
-            local data = characterDataProvider and characterDataProvider(self) or nil
+            local provider = self._guildCoreCharacterContextProvider
+            local data = provider and provider(self) or nil
             CCM:Open(data)
             return
         end

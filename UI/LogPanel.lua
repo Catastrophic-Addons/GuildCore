@@ -147,6 +147,7 @@ function LP:Create(parent)
         local catId = cat.id
         btn:SetScript("OnClick", function()
             LP._dashboardEventFilter = nil
+            LP._characterFilter = nil
             LP._activeFilter = catId
             LP:_updateFilterButtons()
             LP:_applyFilter()
@@ -239,6 +240,17 @@ function LP:_applyFilter()
         filtered = eventFiltered
         selectedLabel = self._dashboardEventFilter == "JOINED" and "joined events" or self._dashboardEventFilter == "LEFT" and "left events" or selectedLabel
     end
+    if self._characterFilter then
+        local target = tostring(self._characterFilter)
+        local characterFiltered = {}
+        for _, e in ipairs(filtered) do
+            if e.playerKey == target then
+                characterFiltered[#characterFiltered + 1] = e
+            end
+        end
+        filtered = characterFiltered
+        selectedLabel = "character " .. target
+    end
     if self.countLabel then
         local total = #self._allLogs
         local shown = #filtered
@@ -260,6 +272,7 @@ end
 
 function LP:ApplyDashboardFilter(filterKey)
     local target = filterKey or "all"
+    self._characterFilter = nil
     self._dashboardEventFilter = nil
     if target == "joined" then
         self._dashboardEventFilter = "JOINED"
@@ -275,6 +288,16 @@ function LP:ApplyDashboardFilter(filterKey)
     self._activeFilter = target
     self:_updateFilterButtons()
     self:_applyFilter()
+end
+
+function LP:FocusCharacter(key)
+    if not self.frame or not key then return false end
+    self._dashboardEventFilter = nil
+    self._activeFilter = "all"
+    self._characterFilter = key
+    self:_updateFilterButtons()
+    self:_applyFilter()
+    return true
 end
 
 -- ─── Refresh ──────────────────────────────────
