@@ -115,9 +115,25 @@ function List.Create(parent, rowH, buildRow, onSelect, onContext)
                 local h = Th.c.rowHover
                 self._hov:SetColorTexture(h[1], h[2], h[3], h[4])
                 self._hov:SetAlpha(1)
+                if GameTooltip and self._tooltipText then
+                    GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+                    if self._tooltipTitle then
+                        GameTooltip:AddLine(self._tooltipTitle, 1, 1, 1)
+                    end
+                    local count = 0
+                    for line in tostring(self._tooltipText):gmatch("([^\n]+)") do
+                        count = count + 1
+                        if count > 5 then break end
+                        GameTooltip:AddLine(line, 1, 0.82, 0.35, true)
+                    end
+                    GameTooltip:Show()
+                end
             end)
             row:SetScript("OnLeave", function(self)
                 self._hov:SetAlpha(0)
+                if GameTooltip and self._tooltipText then
+                    GameTooltip:Hide()
+                end
             end)
             row:SetScript("OnClick", function(self, button)
                 local item = self._item
@@ -180,6 +196,8 @@ function List.Create(parent, rowH, buildRow, onSelect, onContext)
                 row._item = nil
                 row._itemKey = nil
                 row._dataIndex = nil
+                row._tooltipTitle = nil
+                row._tooltipText = nil
                 row:Hide()
             end
         end
@@ -188,6 +206,8 @@ function List.Create(parent, rowH, buildRow, onSelect, onContext)
             rows[i]._item = nil
             rows[i]._itemKey = nil
             rows[i]._dataIndex = nil
+            rows[i]._tooltipTitle = nil
+            rows[i]._tooltipText = nil
             rows[i]:Hide()
         end
 

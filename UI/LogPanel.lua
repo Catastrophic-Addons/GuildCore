@@ -11,6 +11,14 @@ LP._clearConfirmArmed = false
 local function T()  return GC.UI.Theme end
 local function GS() return GC.Services.GuildService end
 
+local function trim(value)
+    return GC.Utils and GC.Utils.Trim and GC.Utils.Trim(value or "") or tostring(value or ""):match("^%s*(.-)%s*$")
+end
+
+local function lower(value)
+    return tostring(value or ""):lower()
+end
+
 -- Event type → {shortLabel, colorKey}
 local EVENT_META = {
     JOINED               = {"Joined",       "statusActive"},
@@ -47,6 +55,130 @@ local FILTER_CATS = {
 
 -- ─── row builder ───────────────────────────────
 
+local SORT_MODES = {
+    { id = "date",   label = "Date" },
+    { id = "member", label = "Member" },
+    { id = "type",   label = "Type" },
+    { id = "detail", label = "Detail" },
+}
+
+local function eventLabel(event)
+    local meta = event and EVENT_META[event] or nil
+    return meta and meta[1] or tostring(event or "Event")
+end
+
+local function playerLabel(item)
+    return item and item.playerKey and item.playerKey:match("^([^%-]+)") or (item and item.playerKey) or "—"
+end
+
+local function detailText(item, full)
+    if not item then return "" end
+    local detail = ""
+    if item.newValue and item.oldValue then
+        local oldValue = tostring(item.oldValue)
+        local newValue = tostring(item.newValue)
+        if full then
+            detail = oldValue .. " -> " .. newValue
+        else
+            detail = oldValue:sub(1, 18) .. " -> " .. newValue:sub(1, 18)
+        end
+    elseif item.newValue then
+        detail = tostring(item.newValue)
+        if not full then
+            detail = detail:sub(1, 64)
+        end
+    end
+    return detail
+end
+
+local function matchesSearch(item, query)
+    query = lower(trim(query))
+    if query == "" then
+        return true
+    end
+
+    local blob = table.concat({
+        eventLabel(item and item.event),
+        tostring(item and item.event or ""),
+        playerLabel(item),
+        detailText(item, true),
+        tostring(item and item.reason or ""),
+        tostring(item and item.bankKind or ""),
+        tostring(item and item.bankTransactionType or ""),
+        tostring(item and item.bankTab or ""),
+        item and item.timestamp and date("%Y-%m-%d %H:%M", item.timestamp) or "",
+    }, " "):lower()
+
+    return blob:find(query, 1, true) ~= nil
+end
+
+local function sortLogs(logs, mode)
+    table.sort(logs, function(a, b)
+        if mode == "member" then
+            local av, bv = lower(playerLabel(a)), lower(playerLabel(b))
+            if av ~= bv then return av < bv end
+        elseif mode == "type" then
+            local av, bv = lower(eventLabel(a and a.event)), lower(eventLabel(b and b.event))
+            if av ~= bv then return av < bv end
+        elseif mode == "detail" then
+            local av, bv = lower(detailText(a, true)), lower(detailText(b, true))
+            if av ~= bv then return av < bv end
+        end
+
+        local at = tonumber(a and a.timestamp) or 0
+        local bt = tonumber(b and b.timestamp) or 0
+        if at ~= bt then return at > bt end
+        return tostring(a and a.key or "") < tostring(b and b.key or "")
+    end)
+    return logs
+end
+
+local function buildBankEntryLookup()
+    local entries = GC.Services and GC.Services.DataStore and GC.Services.DataStore.GetGuildBankEntries
+        and GC.Services.DataStore:GetGuildBankEntries() or nil
+    if type(entries) ~= "table" then
+        return nil
+    end
+
+    local lookup = {}
+    for _, entry in ipairs(entries) do
+        local event = entry.kind == "money" and "BANK_MONEY" or "BANK_ITEM"
+        local key = table.concat({
+            tostring(event),
+            tostring(entry.playerKey or entry.playerName or "Unknown"),
+            tostring(entry.summary or ""),
+        }, "|")
+        lookup[key] = entry
+    end
+    return lookup
+end
+
+local function enrichBankActivityLog(entry, bankLookup)
+    if not entry or entry.reason ~= "guild-bank" or not bankLookup then
+        return entry
+    end
+
+    local key = table.concat({
+        tostring(entry.event or ""),
+        tostring(entry.playerKey or "Unknown"),
+        tostring(entry.newValue or ""),
+    }, "|")
+    local bankEntry = bankLookup[key]
+    if not bankEntry then
+        return entry
+    end
+
+    -- Older mirrored Activity rows used the pull time. When the structured
+    -- bank entry is still present, display/search/sort by the original bank
+    -- log timestamp instead.
+    entry.timestamp = bankEntry.occurredAt or entry.timestamp
+    entry.bankKind = entry.bankKind or bankEntry.kind
+    entry.bankTransactionType = entry.bankTransactionType or bankEntry.transactionType
+    entry.bankTab = entry.bankTab or bankEntry.tabName or bankEntry.tab
+    entry.bankCapturedAt = entry.bankCapturedAt or bankEntry.capturedAt
+    return entry
+end
+
 local function buildLogRow(row, item)
     local Th = T()
     if not row._built then
@@ -67,15 +199,19 @@ local function buildLogRow(row, item)
     row._typeFs:SetText(meta[1])
     row._typeFs:SetTextColor(c[1], c[2], c[3], c[4] or 1)
     row._timeFs:SetText(item.timestamp and date("%m-%d %H:%M", item.timestamp) or "—")
-    local pname = item.playerKey and item.playerKey:match("^([^%-]+)") or (item.playerKey or "—")
-    row._playerFs:SetText(pname)
-    local detail = ""
-    if item.newValue and item.oldValue then
-        detail = tostring(item.oldValue):sub(1, 18) .. " → " .. tostring(item.newValue):sub(1, 18)
-    elseif item.newValue then
-        detail = tostring(item.newValue):sub(1, 36)
-    end
+    row._playerFs:SetText(playerLabel(item))
+    local detail = detailText(item, false)
     row._detailFs:SetText(detail)
+    row._tooltipTitle = item.timestamp and date("%Y-%m-%d %H:%M", item.timestamp) or eventLabel(item.event)
+    local tooltip = {
+        "Type: " .. eventLabel(item.event),
+        "Member: " .. playerLabel(item),
+        "Details: " .. detailText(item, true),
+    }
+    if item.bankTransactionType then tooltip[#tooltip + 1] = "Bank entry: " .. tostring(item.bankTransactionType) end
+    if item.bankTab then tooltip[#tooltip + 1] = "Tab: " .. tostring(item.bankTab) end
+    if item.bankCapturedAt then tooltip[#tooltip + 1] = "Pulled: " .. date("%Y-%m-%d %H:%M", item.bankCapturedAt) end
+    row._tooltipText = table.concat(tooltip, "\n")
 end
 
 -- ─── Create ────────────────────────────────────
@@ -155,10 +291,46 @@ function LP:Create(parent)
         self._filterBtns[catId] = btn
     end
 
-    Th.HSep(frame, filterY - Th.btnH - 6)
+    -- ── Search and organization controls ─────────
+    local searchY = filterY - Th.btnH - 10
+    self.searchBox = GC.UI.Panel.Input(frame, 260, Th.inputH)
+    self.searchBox:SetPoint("TOPLEFT", frame, "TOPLEFT", P, searchY)
+    self.searchBox:SetMaxLetters(80)
+    self.searchHint = Th.Fs(frame, "input", "Search member, date, type, details...", "textDimmed")
+    self.searchHint:SetPoint("LEFT", self.searchBox, "LEFT", 7, 0)
+    self.searchBox:SetScript("OnTextChanged", function(self)
+        local text = self:GetText() or ""
+        if LP.searchHint then
+            LP.searchHint:SetShown(text == "")
+        end
+        LP._searchText = text
+        LP:_applyFilter()
+    end)
+    self.searchBox:SetScript("OnEscapePressed", function(self)
+        self:SetText("")
+        self:ClearFocus()
+    end)
+
+    self._sortMode = self._sortMode or "date"
+    self._sortBtns = {}
+    local sortLabel = Th.Fs(frame, "tiny", "SORT", "textDimmed")
+    sortLabel:SetPoint("LEFT", self.searchBox, "RIGHT", 14, 0)
+    local sortX = P + 260 + 46
+    for i, mode in ipairs(SORT_MODES) do
+        local btn = GC.UI.Button.Create(frame, mode.label, "secondary", 70, Th.btnH)
+        btn:SetPoint("TOPLEFT", frame, "TOPLEFT", sortX + ((i - 1) * 74), searchY)
+        btn:SetScript("OnClick", function()
+            LP._sortMode = mode.id
+            LP:_updateSortButtons()
+            LP:_applyFilter()
+        end)
+        self._sortBtns[mode.id] = btn
+    end
+
+    Th.HSep(frame, searchY - Th.btnH - 6)
 
     -- ── Column header bar ─────────────────────────
-    local colBarY = filterY - Th.btnH - 10
+    local colBarY = searchY - Th.btnH - 10
     local colBar  = CreateFrame("Frame", nil, frame)
     colBar:SetPoint("TOPLEFT",  frame, "TOPLEFT",  0, colBarY)
     colBar:SetPoint("TOPRIGHT", frame, "TOPRIGHT", 0, colBarY)
@@ -191,6 +363,7 @@ function LP:Create(parent)
     self.list:SetEmptyText("No log entries for this filter.")
 
     self:_updateFilterButtons()
+    self:_updateSortButtons()
 end
 
 -- ─── internal ─────────────────────────────────
@@ -200,6 +373,17 @@ function LP:_updateFilterButtons()
     for id, btn in pairs(self._filterBtns) do
         local active = (id == self._activeFilter)
         -- Swap between primary (active) and secondary (inactive) visuals
+        if btn._bg then
+            local c = active and Th.c.btnPrimary or Th.c.btnSecond
+            btn._bg:SetColorTexture(c[1], c[2], c[3], c[4] or 1)
+        end
+    end
+end
+
+function LP:_updateSortButtons()
+    local Th = T()
+    for id, btn in pairs(self._sortBtns or {}) do
+        local active = id == (self._sortMode or "date")
         if btn._bg then
             local c = active and Th.c.btnPrimary or Th.c.btnSecond
             btn._bg:SetColorTexture(c[1], c[2], c[3], c[4] or 1)
@@ -251,6 +435,13 @@ function LP:_applyFilter()
         filtered = characterFiltered
         selectedLabel = "character " .. target
     end
+    local searched = {}
+    for _, e in ipairs(filtered) do
+        if matchesSearch(e, self._searchText) then
+            searched[#searched + 1] = e
+        end
+    end
+    filtered = sortLogs(searched, self._sortMode or "date")
     if self.countLabel then
         local total = #self._allLogs
         local shown = #filtered
@@ -287,6 +478,7 @@ function LP:ApplyDashboardFilter(filterKey)
     end
     self._activeFilter = target
     self:_updateFilterButtons()
+    self:_updateSortButtons()
     self:_applyFilter()
 end
 
@@ -296,6 +488,7 @@ function LP:FocusCharacter(key)
     self._activeFilter = "all"
     self._characterFilter = key
     self:_updateFilterButtons()
+    self:_updateSortButtons()
     self:_applyFilter()
     return true
 end
@@ -305,7 +498,17 @@ end
 function LP:Refresh()
     if not self.frame then return end
     local logs = GS():GetRecentLogs(1000)
-    for i, e in ipairs(logs) do e.key = tostring(i) end
+    local bankLookup = buildBankEntryLookup()
+    for i, e in ipairs(logs) do
+        enrichBankActivityLog(e, bankLookup)
+        e.key = table.concat({
+            tostring(e.timestamp or ""),
+            tostring(e.event or ""),
+            tostring(e.playerKey or ""),
+            tostring(e.newValue or ""),
+            tostring(i),
+        }, "|")
+    end
     self._allLogs = logs
     self:_applyFilter()
 end

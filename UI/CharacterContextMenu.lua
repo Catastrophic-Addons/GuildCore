@@ -111,6 +111,17 @@ local function getAvailability(data)
     }
 end
 
+local function getNoteEditAvailability(data)
+    if GC.Permissions and GC.Permissions.GetNoteEditAvailability then
+        return GC.Permissions:GetNoteEditAvailability(data)
+    end
+    return {
+        enabled = false,
+        protected = false,
+        reason = "Permission service is unavailable.",
+    }
+end
+
 local function focusRoster(data)
     if not data or not data.key then
         return false, "Character is unavailable."
@@ -147,8 +158,8 @@ local function openCopyText(text)
     if not dialog then
         dialog = CreateFrame("Frame", "GuildCoreCharacterCopyDialog", UIParent)
         dialog:SetSize(360, 108)
-        if GC.UI.Layering then
-            GC.UI.Layering:ApplyPopup(dialog, GC.UI.MainFrame and GC.UI.MainFrame.frame, 80)
+        if GC.UI.FrameLayering then
+            GC.UI.FrameLayering:PreparePopupFrame(dialog, GC.UI.MainFrame and GC.UI.MainFrame.frame, 80)
         else
             dialog:SetFrameStrata("DIALOG")
         end
@@ -205,8 +216,12 @@ function CCM:_ensureFrames()
     local catcher = CreateFrame("Button", CATCHER_NAME, UIParent)
     catcher:SetAllPoints(UIParent)
     catcher:EnableMouse(true)
-    catcher:SetFrameStrata("FULLSCREEN_DIALOG")
-    catcher:SetFrameLevel(240)
+    if GC.UI.FrameLayering then
+        GC.UI.FrameLayering:PrepareContextMenuFrame(catcher, GC.UI.FrameLayering.CONTEXT_CATCHER_LEVEL)
+    else
+        catcher:SetFrameStrata("FULLSCREEN_DIALOG")
+        catcher:SetFrameLevel(240)
+    end
     catcher:SetAlpha(0)
     catcher:Hide()
     catcher:SetScript("OnClick", function() CCM:Close() end)
@@ -216,8 +231,12 @@ function CCM:_ensureFrames()
     menu:SetSize(224, 320)
     -- Keep this above the invisible dismiss catcher. The catcher used to sit
     -- over menu rows after the shared popup helper picked a lower frame level.
-    menu:SetFrameStrata("FULLSCREEN_DIALOG")
-    menu:SetFrameLevel(260)
+    if GC.UI.FrameLayering then
+        GC.UI.FrameLayering:PrepareContextMenuFrame(menu, GC.UI.FrameLayering.CONTEXT_MENU_LEVEL)
+    else
+        menu:SetFrameStrata("FULLSCREEN_DIALOG")
+        menu:SetFrameLevel(260)
+    end
     menu:EnableMouse(true)
     menu:SetClampedToScreen(true)
     menu:Hide()
@@ -333,7 +352,11 @@ local function confirm(actionKey, text, onAccept)
         preferredIndex = 3,
     }
     StaticPopupDialogs[actionKey].text = text
-    StaticPopup_Show(actionKey, nil, nil, onAccept)
+    if GC.UI.FrameLayering then
+        GC.UI.FrameLayering:ShowStaticPopup(actionKey, nil, nil, onAccept)
+    else
+        StaticPopup_Show(actionKey, nil, nil, onAccept)
+    end
 end
 
 function CCM:_showTextDialog(kind, data)
@@ -342,9 +365,9 @@ function CCM:_showTextDialog(kind, data)
     local Th = T()
     if not dialog then
         dialog = CreateFrame("Frame", "GuildCoreCharacterTextDialog", UIParent)
-        dialog:SetSize(430, 132)
-        if GC.UI.Layering then
-            GC.UI.Layering:ApplyPopup(dialog, GC.UI.MainFrame and GC.UI.MainFrame.frame, 70)
+        dialog:SetSize(430, 156)
+        if GC.UI.FrameLayering then
+            GC.UI.FrameLayering:PreparePopupFrame(dialog, GC.UI.MainFrame and GC.UI.MainFrame.frame, 70)
         else
             dialog:SetFrameStrata("DIALOG")
         end
@@ -360,12 +383,26 @@ function CCM:_showTextDialog(kind, data)
         dialog.cancel = GC.UI.Button.Create(dialog, "Cancel", "secondary", 78, Th.btnH)
         dialog.cancel:SetPoint("BOTTOMRIGHT", dialog, "BOTTOMRIGHT", -12, 12)
         dialog.cancel:SetScript("OnClick", function() dialog:Hide() end)
+        dialog.warning = Th.Fs(dialog, "tiny", "", "textWarn")
+        dialog.warning:SetPoint("TOPLEFT", dialog, "TOPLEFT", 12, -72)
+        dialog.warning:SetPoint("RIGHT", dialog, "RIGHT", -12, 0)
+        dialog.warning:SetWordWrap(true)
         self.textDialog = dialog
     end
 
     local officer = kind == "officer"
+    local noteAvailability = getNoteEditAvailability(data)
     dialog.title:SetText((officer and "Edit Officer Note: " or "Edit Public Note: ") .. tostring(data.displayName or data.name))
     dialog.input:SetText(officer and (data.officerNote or "") or (data.publicNote or ""))
+    if noteAvailability.protected then
+        dialog.warning:SetText("This character is at your guild rank or higher. " .. tostring(noteAvailability.reason or "Your guild rank may not have permission to edit notes for members at this rank or higher."))
+        dialog.warning:Show()
+    elseif noteAvailability.reason and noteAvailability.enabled then
+        dialog.warning:SetText(noteAvailability.reason)
+        dialog.warning:Show()
+    else
+        dialog.warning:Hide()
+    end
     dialog.input:SetFocus()
     dialog.input:HighlightText()
     dialog.save:SetScript("OnClick", function()
@@ -382,11 +419,21 @@ function CCM:_showTextDialog(kind, data)
                 status(err or "Unable to save note.", "textDanger")
             end
         end
+        local function maybeSaveNote()
+            if noteAvailability.protected then
+                -- Note editing rank protection is independent of promote/demote
+                -- rules. Save verification in GC.API.SetGuildMemberNote catches a
+                -- silent Blizzard rejection before reporting success.
+                confirm("GUILDCORE_CONTEXT_NOTE_PROTECTED", "This character is at your guild rank or higher. Note edits may not be allowed. Try to save anyway?", saveNote)
+                return
+            end
+            saveNote()
+        end
         if trim(oldValue) ~= "" and trim(value) == "" then
-            confirm("GUILDCORE_CONTEXT_CLEAR_NOTE", "Clear this guild note for " .. tostring(data.displayName) .. "?", saveNote)
+            confirm("GUILDCORE_CONTEXT_CLEAR_NOTE", "Clear this guild note for " .. tostring(data.displayName) .. "?", maybeSaveNote)
             return
         end
-        saveNote()
+        maybeSaveNote()
     end)
     dialog:ClearAllPoints()
     dialog:SetPoint("CENTER", UIParent, "CENTER", 0, 80)
@@ -399,8 +446,8 @@ function CCM:_showBanDialog(data)
     if not dialog then
         dialog = CreateFrame("Frame", "GuildCoreCharacterBanDialog", UIParent)
         dialog:SetSize(440, 166)
-        if GC.UI.Layering then
-            GC.UI.Layering:ApplyPopup(dialog, GC.UI.MainFrame and GC.UI.MainFrame.frame, 70)
+        if GC.UI.FrameLayering then
+            GC.UI.FrameLayering:PreparePopupFrame(dialog, GC.UI.MainFrame and GC.UI.MainFrame.frame, 70)
         else
             dialog:SetFrameStrata("DIALOG")
         end
@@ -459,8 +506,8 @@ function CCM:_showMainDialog(data)
     if not dialog then
         dialog = CreateFrame("Frame", "GuildCoreCharacterMainDialog", UIParent)
         dialog:SetSize(360, 124)
-        if GC.UI.Layering then
-            GC.UI.Layering:ApplyPopup(dialog, GC.UI.MainFrame and GC.UI.MainFrame.frame, 70)
+        if GC.UI.FrameLayering then
+            GC.UI.FrameLayering:PreparePopupFrame(dialog, GC.UI.MainFrame and GC.UI.MainFrame.frame, 70)
         else
             dialog:SetFrameStrata("DIALOG")
         end
@@ -667,6 +714,7 @@ function CCM:_buildItems(data)
 
     local availability = getAvailability(data)
     local isOfficer = GC.Permissions and GC.Permissions.IsOfficerOrBetter and GC.Permissions:IsOfficerOrBetter()
+    local noteAvailability = getNoteEditAvailability(data)
     local banned, banEntry = GC.BanBook and GC.BanBook.IsBanned and GC.BanBook:IsBanned(data.name, data.realm)
 
     item({ label = "Whisper", actionId = "whisper", enabled = data.isOnline == true, reason = "Character is offline." })
@@ -679,8 +727,9 @@ function CCM:_buildItems(data)
     item({ label = "Inspect", actionId = "inspect", enabled = canInspect == true, reason = "Inspect requires the character to be nearby or targeted." })
     sep()
 
-    item({ label = "Edit Public Note", actionId = "edit_public_note", enabled = isOfficer, reason = "Officer permission required." })
-    item({ label = "Edit Officer Note", actionId = "edit_officer_note", enabled = isOfficer, reason = "Officer permission required." })
+    local noteLabelSuffix = noteAvailability.protected and " (Protected Rank)" or ""
+    item({ label = "Edit Public Note" .. noteLabelSuffix, actionId = "edit_public_note", enabled = isOfficer, reason = noteAvailability.reason or "Officer permission required." })
+    item({ label = "Edit Officer Note" .. noteLabelSuffix, actionId = "edit_officer_note", enabled = isOfficer, reason = noteAvailability.reason or "Officer permission required." })
     sep()
 
     item({ label = "Promote", actionId = "promote", enabled = availability.promote and availability.promote.enabled, reason = availability.promote and availability.promote.reason })

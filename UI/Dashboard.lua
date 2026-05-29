@@ -21,6 +21,7 @@ local SNAPSHOT_KEYS = {
     initiatesNeedingReview = "initiatesNeedingReview",
     missingDiscordVerification = "missingDiscord",
     unlinkedCharacters = "unknownMainAlt",
+    rosterDataIssues = "rosterDataIssues",
     inactiveMembers = "readyForPurge",
     logCount = "logEntries",
 }
@@ -37,6 +38,7 @@ local ICONS = {
     initiatesNeedingReview = "Interface\\GuildFrame\\GuildFrame",
     missingDiscordVerification = "Interface\\FriendsFrame\\BroadcastIcon",
     unlinkedCharacters = "Interface\\Buttons\\UI-GroupLoot-Pass-Up",
+    rosterDataIssues = "Interface\\DialogFrame\\UI-Dialog-Icon-AlertNew",
     inactiveMembers = "Interface\\DialogFrame\\UI-Dialog-Icon-AlertNew",
 }
 
@@ -58,6 +60,7 @@ local METRIC_GROUPS = {
             {key = "initiatesNeedingReview", label = "Initiates Needing Review", target = "roster_initiates"},
             {key = "missingDiscordVerification", label = "Missing Discord Verification", target = "roster_missing_discord"},
             {key = "unlinkedCharacters", label = "Unlinked / Unknown", target = "roster_unknown_main_alt"},
+            {key = "rosterDataIssues", label = "Roster Data Issues", target = "roster_relationship_issues"},
             {key = "inactiveMembers", label = "Ready for Purge", target = "purge_ready"},
         },
     },
@@ -114,6 +117,58 @@ local function showStatus(message, colorKey)
     if GC.UI and GC.UI.MainFrame then
         GC.UI.MainFrame:SetStatus(message, colorKey or "textSecond")
     end
+end
+
+local function buildRepairPreviewText(preview, result)
+    preview = preview or {}
+    local lines = {}
+    local summary = preview.summary or {}
+    local safeCount = summary.safeActions or #(preview.actions or {})
+    local manualCount = summary.manualReview or #(preview.unsafe or {})
+    lines[#lines + 1] = "Safe Alt Link Repair Preview"
+    lines[#lines + 1] = ""
+    if result then
+        lines[#lines + 1] = string.format("Safe repairs applied: %d. Manual issues remaining: %d.", result.applied or 0, manualCount)
+        if (result.skipped or 0) > 0 then
+            lines[#lines + 1] = string.format("Skipped during apply because data changed: %d.", result.skipped or 0)
+        end
+    elseif safeCount == 0 and manualCount == 0 then
+        lines[#lines + 1] = "No roster relationship issues found."
+    elseif safeCount == 0 then
+        lines[#lines + 1] = "No safe automatic repairs are available. Manual review is required."
+    else
+        lines[#lines + 1] = string.format("Safe repairs ready: %d. Manual review items: %d.", safeCount, manualCount)
+    end
+    lines[#lines + 1] = ""
+    lines[#lines + 1] = "Safe repairs are non-destructive relationship cleanup only."
+    lines[#lines + 1] = "Manual-review items are not fixed automatically; Guild Core will not guess a missing Main."
+    lines[#lines + 1] = "This does not change notes, Discord, join dates, rank history, points, settings, or imported metadata."
+
+    if preview.actions and #preview.actions > 0 then
+        lines[#lines + 1] = ""
+        lines[#lines + 1] = "Safe Repairs"
+        for i, action in ipairs(preview.actions) do
+            if i > 40 then
+                lines[#lines + 1] = string.format("...and %d more", #preview.actions - 40)
+                break
+            end
+            lines[#lines + 1] = string.format("- %s [%s]: %s", tostring(action.characterKey or "?"), tostring(action.action or "repair"), tostring(action.message or "Repair relationship data."))
+        end
+    end
+
+    if preview.unsafe and #preview.unsafe > 0 then
+        lines[#lines + 1] = ""
+        lines[#lines + 1] = "Needs Manual Review"
+        for i, issue in ipairs(preview.unsafe) do
+            if i > 30 then
+                lines[#lines + 1] = string.format("...and %d more", #preview.unsafe - 30)
+                break
+            end
+            lines[#lines + 1] = string.format("- %s [%s]: %s", tostring(issue.characterKey or "?"), tostring(issue.code or "manual"), tostring(issue.message or "Review relationship data."))
+        end
+    end
+
+    return table.concat(lines, "\n")
 end
 
 local function sectionHeader(parent, title, y)
@@ -302,6 +357,7 @@ function DB:CollectMetrics(stats, insights)
         initiatesNeedingReview = insights.initiatesNeedingReview or 0,
         missingDiscordVerification = insights.missingDiscordVerification or 0,
         unlinkedCharacters = insights.unlinkedCharacters or 0,
+        rosterDataIssues = insights.rosterDataIssues or 0,
         inactiveMembers = insights.inactiveMembers or 0,
         lastScanAt = stats.lastScanAt,
     }
@@ -309,7 +365,7 @@ end
 
 function DB:GetHealthState(metrics)
     local state = "stable"
-    if (metrics.inactiveMembers or 0) > 0 or (metrics.unlinkedCharacters or 0) > 50 then
+    if (metrics.rosterDataIssues or 0) > 0 or (metrics.inactiveMembers or 0) > 0 or (metrics.unlinkedCharacters or 0) > 50 then
         state = "critical"
     elseif (metrics.missingDiscordVerification or 0) > 0
         or (metrics.inactive or 0) > 0
@@ -325,10 +381,10 @@ end
 
 function DB:GetHealthSummaryLines(metrics)
     return {
-        string.format("%d members tracked", metrics.total or 0),
-        string.format("%d online now", metrics.online or 0),
-        string.format("%d characters need main/alt review", metrics.unlinkedCharacters or 0),
-        string.format("%d ready for purge", metrics.inactiveMembers or 0),
+        string.format("%d tracked", metrics.total or 0),
+        string.format("%d online", metrics.online or 0),
+        string.format("%d main/alt review", metrics.unlinkedCharacters or 0),
+        string.format("%d data issues", metrics.rosterDataIssues or 0),
     }
 end
 
@@ -355,6 +411,7 @@ function DB:SnapshotFromMetrics(metrics)
         initiatesNeedingReview = metrics.initiatesNeedingReview or 0,
         missingDiscord = metrics.missingDiscordVerification or 0,
         unknownMainAlt = metrics.unlinkedCharacters or 0,
+        rosterDataIssues = metrics.rosterDataIssues or 0,
         readyForPurge = metrics.inactiveMembers or 0,
     }
 end
@@ -402,7 +459,7 @@ function DB:GetMetricState(metricKey, value)
     if metricKey == "online" or metricKey == "active" then
         return value > 0 and "healthy" or "neutral"
     end
-    if metricKey == "inactiveMembers" then
+    if metricKey == "inactiveMembers" or metricKey == "rosterDataIssues" then
         return value > 0 and "danger" or "healthy"
     end
     if metricKey == "inactive" or metricKey == "missingDiscordVerification" or metricKey == "unlinkedCharacters" or metricKey == "initiatesNeedingReview" then
@@ -471,6 +528,11 @@ function DB:NavigateTo(target, payload)
         if roster and roster.ApplyDashboardFilter then roster:ApplyDashboardFilter("unknown_main_alt") end
         finish()
         return
+    elseif target == "roster_relationship_issues" then
+        main:SetActivePanel("roster")
+        if roster and roster.ApplyDashboardFilter then roster:ApplyDashboardFilter("relationship_issues") end
+        finish()
+        return
     elseif target == "roster_missing_discord" then
         main:SetActivePanel("roster")
         if roster and roster.ApplyDashboardFilter then roster:ApplyDashboardFilter("missing_discord") end
@@ -502,6 +564,10 @@ function DB:NavigateTo(target, payload)
         return
     elseif target == "ban_book" then
         main:SetActivePanel("banbook")
+        finish()
+        return
+    elseif target == "relationship_repair" then
+        self:ShowRelationshipRepairPreview()
         finish()
         return
     elseif target == "compliance" then
@@ -586,14 +652,15 @@ function DB:Create(parent)
     self.healthTitle:SetPoint("TOPLEFT", 14, -10)
     self.healthSummary = Th.Fs(health, "data", "", "textSecond")
     self.healthSummary:SetPoint("TOPLEFT", 14, -34)
-    self.healthSummary:SetPoint("RIGHT", health, "RIGHT", -620, 0)
+    self.healthSummary:SetPoint("RIGHT", health, "RIGHT", -660, 0)
     self.healthSummary:SetJustifyH("LEFT")
+    self.healthSummary:SetWordWrap(false)
 
     self.quickButtons = {}
     local quickDefs = {
-        {label = "Scan Roster", target = "roster_all", width = 92, scan = true},
         {label = "Invite Scan", target = "invite_scan", width = 86},
         {label = "Review Unknowns", target = "roster_unknown_main_alt", width = 114},
+        {label = "Repair Alt Links", target = "relationship_repair", width = 108},
         {label = "Compliance", target = "compliance", width = 94},
         {label = "Ban Book", target = "ban_book", width = 82},
         {label = "Activity", target = "activity_all", width = 78},
@@ -601,16 +668,11 @@ function DB:Create(parent)
     local right = -12
     for i = #quickDefs, 1, -1 do
         local def = quickDefs[i]
-        local btn = GC.UI.Button.Create(health, def.label, def.scan and "primary" or "secondary", def.width, Th.btnH)
-        btn:SetPoint("RIGHT", health, "RIGHT", right, 0)
+        local btn = GC.UI.Button.Create(health, def.label, "secondary", def.width, Th.btnH)
+        btn:SetPoint("BOTTOMRIGHT", health, "BOTTOMRIGHT", right, 10)
         right = right - def.width - 6
         btn:SetScript("OnClick", function()
-            if def.scan then
-                local ok, err = GS():TriggerScan()
-                showStatus(ok and "Roster scan requested..." or (err or "Unable to scan."), ok and "textWarn" or "textDanger")
-            else
-                DB:NavigateTo(def.target)
-            end
+            DB:NavigateTo(def.target)
         end)
         self.quickButtons[#self.quickButtons + 1] = btn
     end
@@ -677,8 +739,8 @@ function DB:Create(parent)
     exportOverlay:SetPoint("TOPLEFT", frame, "TOPLEFT", P + 18, -(P + 96))
     exportOverlay:SetPoint("TOPRIGHT", frame, "TOPRIGHT", -P - 18, -(P + 96))
     exportOverlay:SetHeight(250)
-    if GC.UI.Layering then
-        GC.UI.Layering:ApplyPopup(exportOverlay, GC.UI.MainFrame and GC.UI.MainFrame.frame, 35)
+    if GC.UI.FrameLayering then
+        GC.UI.FrameLayering:PreparePopupFrame(exportOverlay, GC.UI.MainFrame and GC.UI.MainFrame.frame, 35)
     else
         exportOverlay:SetFrameStrata("DIALOG")
     end
@@ -692,6 +754,28 @@ function DB:Create(parent)
     local exportClose = GC.UI.Button.Create(exportOverlay, "Close", "secondary", 70, Th.btnH)
     exportClose:SetPoint("TOPRIGHT", -12, -8)
     exportClose:SetScript("OnClick", function() exportOverlay:Hide() end)
+
+    local repairApply = GC.UI.Button.Create(exportOverlay, "Apply Safe Repairs", "primary", 138, Th.btnH)
+    repairApply:SetPoint("RIGHT", exportClose, "LEFT", -8, 0)
+    repairApply:Hide()
+    repairApply:SetScript("OnClick", function()
+        if not self._relationshipRepairPreview or not GC.Modules.RosterRelationships then return end
+        local result = GC.Modules.RosterRelationships:ApplyRepairPreview(self._relationshipRepairPreview)
+        self._relationshipRepairResult = result
+        local nextPreview = GC.Modules.RosterRelationships:BuildRepairPreview()
+        self._relationshipRepairPreview = nextPreview
+        if self.exportEdit then
+            self.exportEdit:SetText(buildRepairPreviewText(nextPreview, result))
+            self.exportEdit:HighlightText(0, 0)
+            self.exportEdit:SetCursorPosition(0)
+        end
+        repairApply:SetEnabled((nextPreview.summary and nextPreview.summary.safeActions or #(nextPreview.actions or {})) > 0)
+        showStatus(string.format("Safe repairs applied: %d. Manual issues remaining: %d.", result.applied or 0, nextPreview.summary and nextPreview.summary.manualReview or 0), (result.applied or 0) > 0 and "textSuccess" or "textWarn")
+        if GC.UI.RosterPanel and GC.UI.RosterPanel.Refresh then GC.UI.RosterPanel:Refresh() end
+        if GC.UI.PlayerPanel and GC.UI.PlayerPanel.Refresh then GC.UI.PlayerPanel:Refresh() end
+        if GC.UI.Dashboard and GC.UI.Dashboard.Refresh then GC.UI.Dashboard:Refresh() end
+    end)
+    self.repairApplyBtn = repairApply
 
     local exportScroll = CreateFrame("ScrollFrame", nil, exportOverlay)
     exportScroll:SetPoint("TOPLEFT", exportOverlay, "TOPLEFT", 12, -40)
@@ -770,7 +854,7 @@ function DB:Refresh()
     self.healthStripe:SetColorTexture(hc[1], hc[2], hc[3], 0.9)
     self.healthTitle:SetText("Guild Health: " .. health.label)
     self.healthTitle:SetTextColor(hc[1], hc[2], hc[3], hc[4] or 1)
-    self.healthSummary:SetText(noScan and "No roster scan data yet. Run Scan Roster to populate dashboard metrics." or table.concat(health.lines, "   |   "))
+    self.healthSummary:SetText(noScan and "No roster scan data yet. Open Roster or Invite to scan." or table.concat(health.lines, "   |   "))
 
     local healthH = settings.showHealth ~= false and (settings.compactMode and 64 or 86) or 0
     local gap = settings.compactMode and 6 or P
@@ -838,6 +922,9 @@ function DB:Refresh()
         if row.action == "Ready for Purge" then
             row.state = "danger"
             row.target = "purge_ready"
+        elseif row.issue and row.action == "Review Main / Alt Links" then
+            row.state = "danger"
+            row.target = "roster_relationship_issues"
         elseif row.issue and row.issue:find("Discord", 1, true) then
             row.state = "warning"
             row.target = "roster_missing_discord"
@@ -860,14 +947,14 @@ function DB:Refresh()
             else
                 self.actionEmpty:SetMessage(
                     noScan and "No roster scan data yet." or "No action items found.",
-                    noScan and "Run Scan Roster to populate dashboard metrics." or "Roster, compliance, and moderation checks are clear."
+                    noScan and "Open Roster or Invite to scan when needed." or "Roster, compliance, and moderation checks are clear."
                 )
                 self.actionEmpty:Show()
                 debugLog("empty state rendered", noScan and "no scan" or "clear")
             end
         end
         self.attentionList:Refresh(hasRows and attentionRows or {})
-        self.attentionList:SetEmptyText(noScan and "No roster scan yet. Run Scan Roster to populate the action queue." or "No urgent action items. Guild looks tidy.")
+        self.attentionList:SetEmptyText(noScan and "No roster scan yet. Open Roster or Invite to scan when needed." or "No urgent action items. Guild looks tidy.")
     end
 
     if GC.UI.MainFrame and GC.UI.MainFrame.promptTitle then
@@ -894,11 +981,44 @@ end
 
 function DB:ShowExport()
     if not self.exportOverlay or not self.exportEdit then return end
+    if self.repairApplyBtn then self.repairApplyBtn:Hide() end
+    self._relationshipRepairPreview = nil
     if self.exportHdr then self.exportHdr:SetText("Export Guild Insights") end
     self.exportEdit:SetText(GS():GetNeedsAttentionExportText())
     self.exportEdit:HighlightText()
     self.exportEdit:SetFocus()
     self.exportOverlay:Show()
+end
+
+function DB:ShowRelationshipRepairPreview()
+    if not self.exportOverlay or not self.exportEdit then return end
+    local service = GC.Modules and GC.Modules.RosterRelationships
+    if not service or not service.BuildRepairPreview then
+        showStatus("Relationship repair service is unavailable.", "textDanger")
+        return
+    end
+    local preview = service:BuildRepairPreview()
+    self._relationshipRepairPreview = preview
+    self._relationshipRepairResult = nil
+    if self.exportHdr then self.exportHdr:SetText("Safe Alt Link Repair Preview") end
+    self.exportEdit:SetText(buildRepairPreviewText(preview))
+    self.exportEdit:HighlightText(0, 0)
+    self.exportEdit:SetCursorPosition(0)
+    self.exportEdit:SetFocus()
+    if self.repairApplyBtn then
+        self.repairApplyBtn:Show()
+        self.repairApplyBtn:SetEnabled((preview.summary and preview.summary.safeActions or #(preview.actions or {})) > 0)
+    end
+    self.exportOverlay:Show()
+    local safeCount = preview.summary and preview.summary.safeActions or #(preview.actions or {})
+    local manualCount = preview.summary and preview.summary.manualReview or #(preview.unsafe or {})
+    if safeCount == 0 and manualCount == 0 then
+        showStatus("No roster relationship issues found.", "textSuccess")
+    elseif safeCount == 0 then
+        showStatus("No safe automatic repairs are available. Manual review is required.", "textWarn")
+    else
+        showStatus("Safe alt link repair preview is ready.", "textWarn")
+    end
 end
 
 function DB:RunCompliance()
@@ -907,6 +1027,8 @@ function DB:RunCompliance()
         GC.UI.MainFrame:SetStatus("Compliance service is unavailable.", "textDanger")
         return
     end
+    if self.repairApplyBtn then self.repairApplyBtn:Hide() end
+    self._relationshipRepairPreview = nil
     local result = service:Run()
     if self.exportHdr then self.exportHdr:SetText("Compliance Check Results") end
     if self.exportEdit then

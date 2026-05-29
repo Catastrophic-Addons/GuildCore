@@ -46,6 +46,19 @@ local function addIssue(issues, player, check, message)
     }
 end
 
+local function discordStatus(player)
+    if GC.Utils and GC.Utils.GetDiscordVerificationStatus then
+        return GC.Utils.GetDiscordVerificationStatus(player)
+    end
+    if GC.Utils and GC.Utils.IsInitiateRank and GC.Utils.IsInitiateRank(player and player.rankName) then
+        return "skipped", "Skipped: Initiate"
+    end
+    if player and player.officerData and player.officerData.discordVerified == true then
+        return "verified", "Verified"
+    end
+    return "missing", "Missing Discord Verification"
+end
+
 local function activePlayers()
     local players = GC.Services.DataStore:GetPlayers() or {}
     local list = {}
@@ -76,6 +89,11 @@ function Compliance:Run()
     local issues = {}
     local players = activePlayers()
     local groups = {}
+    local discordSummary = {
+        verified = 0,
+        missing = 0,
+        skipped = 0,
+    }
 
     for _, player in ipairs(players) do
         if enabled(settings, "publicNote") and trim(player.publicNote) == "" then
@@ -87,11 +105,19 @@ function Compliance:Run()
         if enabled(settings, "joinDate") and not (player.joinedAt or (player.officerData and player.officerData.joinDate)) then
             addIssue(issues, player, "joinDate", "Join date is missing.")
         end
-        if enabled(settings, "discordName") and trim(player.officerData and player.officerData.discordName) == "" then
+        local discordState, discordLabel = discordStatus(player)
+        if discordSummary[discordState] ~= nil then
+            discordSummary[discordState] = discordSummary[discordState] + 1
+        end
+
+        -- Discord compliance excludes Initiates only. Existing note parsing
+        -- still decides whether Discord names, DiscordOK, and verified flags
+        -- count as present/verified for every non-Initiate rank.
+        if discordState ~= "skipped" and enabled(settings, "discordName") and trim(player.officerData and player.officerData.discordName) == "" then
             addIssue(issues, player, "discordName", "Discord name is missing.")
         end
-        if enabled(settings, "discordVerified") and not (player.officerData and player.officerData.discordVerified == true) then
-            addIssue(issues, player, "discordVerified", "Discord verification is missing.")
+        if discordState ~= "skipped" and enabled(settings, "discordVerified") and discordState ~= "verified" then
+            addIssue(issues, player, "discordVerified", discordLabel)
         end
 
         if GC.AltMain and GC.AltMain.GetGroup then
@@ -149,6 +175,13 @@ function Compliance:Run()
         end
     end
     lines[#lines + 1] = ""
+    if enabled(settings, "discordVerified") then
+        lines[#lines + 1] = "Discord Verification:"
+        lines[#lines + 1] = "- Verified: " .. tostring(discordSummary.verified)
+        lines[#lines + 1] = "- Missing Discord Verification: " .. tostring(discordSummary.missing)
+        lines[#lines + 1] = "- Skipped: Initiate: " .. tostring(discordSummary.skipped)
+        lines[#lines + 1] = ""
+    end
     lines[#lines + 1] = "Findings: " .. tostring(#issues)
     lines[#lines + 1] = ""
     for _, issue in ipairs(issues) do

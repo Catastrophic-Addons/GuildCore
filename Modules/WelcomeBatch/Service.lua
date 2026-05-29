@@ -9,7 +9,6 @@ GC.Services.WelcomeBatch = {}
 local WB = GC.Services.WelcomeBatch
 
 local RECENT_TTL_SECONDS = 7 * 24 * 60 * 60
-local MAX_GUILD_MESSAGE_LENGTH = 255
 
 local function trim(value)
     return GC.Utils and GC.Utils.Trim and GC.Utils.Trim(value or "") or tostring(value or ""):match("^%s*(.-)%s*$")
@@ -79,12 +78,6 @@ local function formatNames(names)
         parts[#parts + 1] = names[index]
     end
     return table.concat(parts, ", ") .. ", and " .. names[#names]
-end
-
-local function formatNamesWithOverflow(names)
-    if #names == 0 then return "" end
-    if #names == 1 then return names[1] .. " and others" end
-    return table.concat(names, ", ") .. ", and others"
 end
 
 local function debugLog(...)
@@ -279,37 +272,6 @@ function WB:BuildMessage(namesText)
     return template .. " " .. namesText
 end
 
-function WB:BuildBoundedMessage(names)
-    local namesText = formatNames(names)
-    local message = self:BuildMessage(namesText)
-    if #message <= MAX_GUILD_MESSAGE_LENGTH then
-        return message
-    end
-
-    local kept = {}
-    for index, name in ipairs(names) do
-        kept[#kept + 1] = name
-        local candidateNames = index < #names and formatNamesWithOverflow(kept) or formatNames(kept)
-        if #self:BuildMessage(candidateNames) > MAX_GUILD_MESSAGE_LENGTH then
-            table.remove(kept)
-            break
-        end
-    end
-
-    if #kept == 0 then
-        message = self:BuildMessage("new members")
-    elseif #kept < #names then
-        message = self:BuildMessage(formatNamesWithOverflow(kept))
-    else
-        message = self:BuildMessage(formatNames(kept))
-    end
-
-    if #message > MAX_GUILD_MESSAGE_LENGTH then
-        message = message:sub(1, MAX_GUILD_MESSAGE_LENGTH - 3) .. "..."
-    end
-    return message
-end
-
 function WB:CanSend()
     if not self:IsEnabled() then
         return false, "disabled"
@@ -362,7 +324,7 @@ function WB:SendBatch()
         names[#names + 1] = entry.name
     end
 
-    local message = self:BuildBoundedMessage(names)
+    local message = self:BuildMessage(formatNames(names))
     local ok, err
     if GC.API and GC.API.SendGuildMessage then
         ok, err = GC.API.SendGuildMessage(message)

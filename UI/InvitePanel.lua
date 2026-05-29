@@ -183,8 +183,12 @@ local function makeRealmDropdown(parent, width, onChange)
     local itemH = Th.btnH or 24
     local menu = CreateFrame("Frame", nil, UIParent)
     menu:SetSize(width or 150, #options * itemH)
-    menu:SetFrameStrata("TOOLTIP")
-    menu:SetFrameLevel(210)
+    if GC.UI.FrameLayering then
+        GC.UI.FrameLayering:PreparePopupFrame(menu, GC.UI.MainFrame and GC.UI.MainFrame.frame, 90)
+    else
+        menu:SetFrameStrata("DIALOG")
+        menu:SetFrameLevel(210)
+    end
     Th.Bg(menu, Th.c.panel, Th.c.borderAccent)
     menu:Hide()
 

@@ -9,6 +9,7 @@
 --   key         = candidate.key,
 --   name        = candidate.name,
 --   fullName    = candidate.fullName,
+--   realm       = candidate.realm,
 --   level       = candidate.level,
 --   className   = candidate.className,
 --   zone        = candidate.zone,
@@ -373,6 +374,7 @@ function Queue:AddCandidate(candidate)
         key         = candidate.key,
         name        = candidate.name,
         fullName    = candidate.fullName,
+        realm       = candidate.realm,
         level       = candidate.level,
         className   = candidate.className,
         zone        = candidate.zone,
@@ -597,7 +599,7 @@ function Queue:InviteNow(candidate)
     local target = candidate.fullName or candidate.name or candidate.key
     printLine("Direct invite dispatch:", tostring(target))
 
-    local ok, err = GC.API.GuildInvite(target)
+    local ok, err = GC.API.GuildInvite(target, candidate.realm)
     candidate.processedAt = now()
     if ok then
         if candidate.status == "sending" then
@@ -891,7 +893,7 @@ function Queue:_processLiveNext()
         tostring(item.fullName or item.name or item.key),
         math.max(0, countQueuedItems() - 1)
     ))
-    local ok, err = GC.API.GuildInvite(item.fullName or item.name or item.key)
+    local ok, err = GC.API.GuildInvite(item.fullName or item.name or item.key, item.realm)
     item.processedAt = now()
     if ok then
         rt.liveInviteCount = (rt.liveInviteCount or 0) + 1

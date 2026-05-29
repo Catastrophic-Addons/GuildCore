@@ -237,10 +237,10 @@ function MF:CreateMiniFrame()
     mini:EnableMouse(true)
     mini:RegisterForDrag("LeftButton")
     mini:SetClampedToScreen(true)
-    if GC.UI.Layering then
-        GC.UI.Layering:ApplyMainFrame(mini)
+    if GC.UI.FrameLayering then
+        GC.UI.FrameLayering:PrepareMainFrame(mini)
     else
-        mini:SetFrameStrata("DIALOG")
+        mini:SetFrameStrata("HIGH")
         mini:SetFrameLevel(80)
     end
     if uiState.miniX and uiState.miniY then
@@ -354,10 +354,10 @@ function MF:Create()
     frame:SetMovable(true)
     frame:EnableMouse(true)
     frame:RegisterForDrag("LeftButton")
-    if GC.UI.Layering then
-        GC.UI.Layering:ApplyMainFrame(frame)
+    if GC.UI.FrameLayering then
+        GC.UI.FrameLayering:PrepareMainFrame(frame)
     else
-        frame:SetFrameStrata("DIALOG")
+        frame:SetFrameStrata("HIGH")
         frame:SetFrameLevel(80)
     end
     frame:SetClampedToScreen(true)
@@ -397,14 +397,15 @@ function MF:Create()
     local shadow = CreateFrame("Frame", nil, UIParent)
     shadow:SetPoint("TOPLEFT",     frame, "TOPLEFT",     -6, 6)
     shadow:SetPoint("BOTTOMRIGHT", frame, "BOTTOMRIGHT",  6,-6)
-    if GC.UI.Layering then
-        GC.UI.Layering:ApplyShadow(shadow, frame)
+    if GC.UI.FrameLayering then
+        GC.UI.FrameLayering:PrepareShadowFrame(shadow, frame)
     else
-        shadow:SetFrameStrata("DIALOG")
+        shadow:SetFrameStrata("HIGH")
         shadow:SetFrameLevel(math.max(1, (frame:GetFrameLevel() or 80) - 1))
     end
     shadow:Hide()
     Th.Bg(shadow, {0, 0, 0, 0.60})
+    self.shadowFrame = shadow
 
     frame:SetScript("OnShow", function()
         shadow:Show()
@@ -539,16 +540,8 @@ function MF:Create()
         {id = "log",        label = "Activity"},
         {id = "messaging",  label = "Messages"},
         {id = "settings",   label = "Settings"},
+        {id = "help",       label = "Help"},
     }
-
-    -- Scan button pinned at bottom of sidebar
-    local scanBtn = GC.UI.Button.Create(sidebar, "Scan Now", "primary", Th.navWidth - 16, Th.btnH)
-    scanBtn:SetPoint("BOTTOMLEFT", sidebar, "BOTTOMLEFT", 8, 8)
-    scanBtn:SetTooltip("Refresh Roster", "Requests a live guild roster update from the server.")
-    scanBtn:SetScript("OnClick", function()
-        local ok, err = GC.Services.GuildService:TriggerScan()
-        MF:SetStatus(ok and "Requesting scan…" or (err or "Unable to scan."), ok and "textWarn" or "textDanger")
-    end)
 
     local navItemH = 42
     for i, item in ipairs(navItems) do
@@ -726,6 +719,10 @@ function MF:Create()
         GC.UI.SettingsPanel:Create(panelHost)
         panels.settings.frame = GC.UI.SettingsPanel.frame
     end, refresh = function() GC.UI.SettingsPanel:Refresh() end}
+    panels.help       = {hasDetail = false, create = function()
+        GC.UI.HelpPanel:Create(panelHost)
+        panels.help.frame = GC.UI.HelpPanel.frame
+    end, refresh = function() GC.UI.HelpPanel:Refresh() end}
 
     -- Restore last panel (no refresh; frame is still hidden).
     local startPanel = (uiState.lastPanel and panels[uiState.lastPanel]) and uiState.lastPanel or "dashboard"
@@ -749,9 +746,9 @@ end
 function GC.UI:Show()
     if not MF.frame then MF:Create() end
     MF:CreateMiniFrame()
-    if GC.UI.Layering then
-        GC.UI.Layering:ApplyMainFrame(MF.frame)
-        GC.UI.Layering:ApplyMainFrame(MF.miniFrame)
+    if GC.UI.FrameLayering then
+        GC.UI.FrameLayering:PrepareMainFrame(MF.frame)
+        GC.UI.FrameLayering:PrepareMainFrame(MF.miniFrame)
     end
     local ui = GC.DB:GetUIState()
     if ui.minimized then

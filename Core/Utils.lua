@@ -62,6 +62,24 @@ function GC.Utils.NormalizeRankName(rankName)
     return GC.Utils.LowerTrim(rankName):gsub("%s+", " ")
 end
 
+function GC.Utils.IsInitiateRank(rankName)
+    return GC.Utils.NormalizeRankName(rankName) == "initiate"
+end
+
+function GC.Utils.GetDiscordVerificationStatus(player)
+    if GC.Utils.IsInitiateRank(player and player.rankName) then
+        -- Initiates are still onboarding/trial members, so Discord
+        -- verification compliance intentionally does not apply yet.
+        return "skipped", "Skipped: Initiate"
+    end
+
+    if player and player.officerData and player.officerData.discordVerified == true then
+        return "verified", "Verified"
+    end
+
+    return "missing", "Missing Discord Verification"
+end
+
 function GC.Utils.IsTrackedRank(rankName)
     local normalized = GC.Utils.NormalizeRankName(rankName)
     return normalized == "member" or normalized == "initiate"
@@ -115,7 +133,10 @@ local function parseDiscordFlag(noteLower)
     if noteLower:find("discord%s*[:=]%s*(no|false|n)") or noteLower:find("discord%s*unverified") then
         return false
     end
-    if noteLower:find("discord%s*[:=]%s*(yes|true|y|ok)") or noteLower:find("discord%s*verified") or noteLower:find("verified%s*discord") then
+    if noteLower:find("discord%s*[:=]%s*(yes|true|y|ok)")
+        or noteLower:find("discord%s*ok%f[%A]")
+        or noteLower:find("discord%s*verified")
+        or noteLower:find("verified%s*discord") then
         return true
     end
     return nil

@@ -9,12 +9,25 @@ local now      = H.now
 local copyTable = H.copyTable
 local getGuild  = H.getGuild
 
+local GUILD_MESSAGE_DELAY = H.DEFAULT_AUTO_SEND_DELAY or 2
+
+local function queueStorage()
+    local guild = getGuild()
+    if not guild then return nil, "No guild data available." end
+    guild.messageQueue = guild.messageQueue or {}
+    if type(guild.messageQueue) ~= "table" then
+        return nil, "Message queue storage is malformed. Clear Queue or repair the queue before adding more chunks."
+    end
+    return guild.messageQueue
+end
+
 function I:BuildPreview(body, options)
     local chunker = GC.Services.MessageChunker
     if not chunker then return {} end
 
     options = options or {}
-    options.limit = math.max(20, math.min(255, tonumber(options.limit) or 240))
+    options.limit = math.max(20, math.min(255, tonumber(options.limit) or 255))
+    options.includeNumbers = false
 
     local resolvedResult = self:ResolvePlaceholderResult(body, options)
     local resolved = resolvedResult.text or ""
@@ -30,6 +43,12 @@ function I:BuildPreview(body, options)
     preview.unknownPlaceholders     = copyTable(resolvedResult.unknown or {})
     preview.resolvedBody            = resolved
     return preview
+end
+
+function I:SplitMessage(message, maxLength)
+    local chunker = GC.Services.MessageChunker
+    if not chunker or not chunker.Split then return {} end
+    return chunker:Split(message, { limit = maxLength or 255, includeNumbers = false })
 end
 
 function I:GetQueue()
@@ -197,13 +216,8 @@ function I:QueueChunks(chunks, options)
         return false, "Messaging module is disabled."
     end
 
-    local guild = getGuild()
-    if not guild then return false, "No guild data available." end
-
-    guild.messageQueue = guild.messageQueue or {}
-    if type(guild.messageQueue) ~= "table" then
-        return false, "Message queue storage is malformed. Clear Queue or repair the queue before adding more chunks."
-    end
+    local queue, queueErr = queueStorage()
+    if not queue then return false, queueErr end
 
     options = options or {}
     local ok, err, _, channelOptions = self:ValidateChannelOptions(options)
@@ -216,33 +230,81 @@ function I:QueueChunks(chunks, options)
         local text = type(chunk) == "table" and chunk.text or chunk
         text = trim(text)
         if text ~= "" then
-            pending[#pending + 1] = {
-                text            = text,
-                target          = target,
-                recipient       = recipient,
-                sourceMessageId = options.sourceMessageId,
-                queuedAt        = now(),
-            }
+            local parts = { text }
+            if target == "GUILD" and #text > 255 then
+                parts = self:SplitMessage(text, 255)
+            end
+            for _, part in ipairs(parts) do
+                part = trim(part)
+                if part ~= "" then
+                    pending[#pending + 1] = {
+                        text            = part,
+                        target          = target,
+                        recipient       = recipient,
+                        sourceMessageId = options.sourceMessageId,
+                        queuedAt        = now(),
+                    }
+                end
+            end
         end
     end
 
     if #pending == 0 then return false, "Nothing to queue." end
 
     local maxQueueSize = self:GetMaxQueueSize()
-    if (#guild.messageQueue + #pending) > maxQueueSize then
+    if (#queue + #pending) > maxQueueSize then
         return false, string.format("Queue limit reached (%d). Clear or send queued chunks first.", maxQueueSize)
     end
 
-    local batchId = tostring(now()) .. "-" .. tostring(#guild.messageQueue + 1)
+    local batchId = tostring(now()) .. "-" .. tostring(#queue + 1)
     for index, entry in ipairs(pending) do
         entry.batchId    = batchId
         entry.batchIndex = index
         entry.chunkCount = #pending
     end
     for _, entry in ipairs(pending) do
-        guild.messageQueue[#guild.messageQueue + 1] = entry
+        queue[#queue + 1] = entry
     end
     return true
+end
+
+-- Guild chat has one outbound path: split once, enqueue ordered chunks, then let
+-- ProcessQueue send each chunk through SendGuildChunk with timer spacing.
+function I:QueueGuildMessage(message, options)
+    if not self:IsEnabled() then
+        return false, "Messaging module is disabled."
+    end
+
+    message = trim(message)
+    if message == "" then return false, "Guild message is empty." end
+
+    options = options or {}
+    local resolved = options.resolvePlaceholders ~= false and self:ResolvePlaceholders(message, options) or message
+    local parts = self:SplitMessage(resolved, 255)
+    local ok, err = self:QueueChunks(parts, {
+        target          = "GUILD",
+        sourceMessageId = options.sourceMessageId,
+    })
+    if not ok then return false, err end
+
+    if options.autoSend ~= false then
+        self:ProcessQueue()
+    end
+
+    return true, nil, { chunkCount = #parts, chunks = parts }
+end
+
+function I:DebugSplitMessage(message, maxLength)
+    local chunks = self:SplitMessage(message, maxLength or 255)
+    local out = GC.Print and function(...)
+        GC:Print("Messages:", ...)
+    end or print
+
+    out(string.format("split test: %d chunk%s", #chunks, #chunks == 1 and "" or "s"))
+    for index, chunk in ipairs(chunks) do
+        out(string.format("[%d] len=%d %s", index, #chunk, chunk))
+    end
+    return chunks
 end
 
 function I:BuildMessagePreview(messageId, options)
@@ -349,7 +411,16 @@ function I:SendNextQueuedMessage()
         return false, (validationErr or "Queued message is malformed.") .. " Clear Queue or repair the queue."
     end
 
-    SendChatMessage(normalized.text, normalized.target, nil, normalized.recipient)
+    local ok, err
+    if normalized.target == "GUILD" then
+        ok, err = self:SendGuildChunk(normalized.text)
+    else
+        ok, err = pcall(SendChatMessage, normalized.text, normalized.target, nil, normalized.recipient)
+    end
+    if not ok then
+        return false, tostring(err or "Unable to send queued message.")
+    end
+
     table.remove(guild.messageQueue, 1)
     self._lastSendAt = currentTime > 0 and currentTime or nil
     if type(nextEntry) == "table" and nextEntry.sourceMessageId and (tonumber(nextEntry.batchIndex) or 1) == 1 then
@@ -360,6 +431,64 @@ function I:SendNextQueuedMessage()
             chunkCount = tonumber(nextEntry.chunkCount) or 1,
         })
     end
+    return true
+end
+
+function I:SendGuildChunk(chunk)
+    chunk = trim(chunk)
+    if chunk == "" then return false, "Guild message chunk is empty." end
+    if #chunk > 255 then return false, "Guild message chunk exceeds 255 characters." end
+    if not SendChatMessage then return false, "SendChatMessage is unavailable." end
+
+    local ok, err = pcall(SendChatMessage, chunk, "GUILD")
+    if not ok then return false, tostring(err) end
+    return true
+end
+
+function I:ProcessQueue()
+    if self._processingQueue then return true end
+    self._processingQueue = true
+
+    local function step()
+        local queue = self:GetQueue()
+        if #queue == 0 then
+            self._processingQueue = false
+            self:StopAutoSend("complete")
+            return
+        end
+
+        local ok, err = self:SendNextQueuedMessage()
+        if not ok then
+            if err and err:find("Please wait", 1, true) and C_Timer and C_Timer.After then
+                local delay = self.GetAutoSendDelaySeconds and self:GetAutoSendDelaySeconds() or GUILD_MESSAGE_DELAY
+                C_Timer.After(math.max(delay, H.SEND_COOLDOWN_SECONDS or 1.2), step)
+                return
+            end
+            self._processingQueue = false
+            self:StopAutoSend("error")
+            if GC.Debug then
+                GC:Debug("Messages:", err or "Unable to send queued guild message.")
+            elseif GC.Print then
+                GC:Print(err or "Unable to send queued guild message.")
+            end
+            return
+        end
+
+        if self:GetQueueSize() == 0 then
+            self._processingQueue = false
+            self:StopAutoSend("complete")
+            return
+        end
+
+        if C_Timer and C_Timer.After then
+            local delay = self.GetAutoSendDelaySeconds and self:GetAutoSendDelaySeconds() or GUILD_MESSAGE_DELAY
+            C_Timer.After(delay, step)
+        else
+            self._processingQueue = false
+        end
+    end
+
+    step()
     return true
 end
 

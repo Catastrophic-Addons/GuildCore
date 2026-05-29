@@ -2,7 +2,7 @@
 ## Title: Guild Core
 ## Notes: Modern guild management suite for World of Warcraft (Retail).
 ## Author: Catastrophie
-## Version: 1.5.20
+## Version: 1.5.29b
 ## SavedVariables: GuildCoreDB
 ## IconTexture: Interface/AddOns/GuildCore/Assets/icons/GC_Gold
 
@@ -25,6 +25,7 @@ Modules\Roster\Service.lua
 Modules\Roster\Scan.lua
 Modules\Roster\Diff.lua
 Modules\Roster\History.lua
+Modules\Roster\GRMImport.lua
 
 Modules\Bank\Service.lua
 
@@ -85,12 +86,16 @@ UI\CommunityTab.lua
 UI\Dashboard.lua
 UI\PurgePanel.lua
 UI\RosterPanel.lua
+UI\RosterGRMImportPopup.lua
 UI\EditCharacterPopup.lua
 UI\PlayerPanel.lua
 UI\LogPanel.lua
+UI\Messages\MessageEditorPopup.lua
+UI\Messages\SendPreviewPopup.lua
 UI\MessagingPanel.lua
 UI\InvitePanel.lua
 UI\BanBookPanel.lua
 UI\SettingsPanel.lua
+UI\HelpPanel.lua
 
 GuildCore.lua

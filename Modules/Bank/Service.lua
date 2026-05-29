@@ -91,11 +91,18 @@ end
 local function appendActivityLog(entry)
     local eventType = entry.kind == "money" and "BANK_MONEY" or "BANK_ITEM"
     GC.Services.DataStore:AppendLog({
-        timestamp = entry.capturedAt or time(),
+        -- Mirror the actual bank-log entry time, not the time GuildCore pulled
+        -- the log into saved variables. Blizzard exposes bank log age as
+        -- relative fields, so occurredAt is a best-effort absolute timestamp.
+        timestamp = entry.occurredAt or entry.capturedAt or time(),
         event = eventType,
         playerKey = entry.playerKey or entry.playerName or "Unknown",
         newValue = entry.summary,
         reason = "guild-bank",
+        bankKind = entry.kind,
+        bankTransactionType = entry.transactionType,
+        bankTab = entry.tabName or entry.tab,
+        bankCapturedAt = entry.capturedAt,
     })
 end
 

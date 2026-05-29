@@ -28,6 +28,22 @@ local function fmtDate(ts)
     return tonumber(ts) and date("%Y-%m-%d", ts) or "-"
 end
 
+local function tooltipLines(text)
+    local lines = {}
+    for line in tostring(text or ""):gmatch("([^\n]+)") do
+        if line ~= "" then
+            lines[#lines + 1] = line
+        end
+    end
+    return lines
+end
+
+local function setValueTooltip(fs, text)
+    if fs then
+        fs._tooltipText = text
+    end
+end
+
 local function normalizedRealm(realm)
     realm = tostring(realm or "")
     if realm == "" then
@@ -93,11 +109,34 @@ local function labelValue(parent, label, y)
     local l = Th.Fs(parent, "small", label, "textSecond")
     l:SetPoint("TOPLEFT", parent, "TOPLEFT", P, y)
     l:SetWidth(128)
+    local hit = CreateFrame("Frame", nil, parent)
+    hit:SetPoint("TOPLEFT", parent, "TOPLEFT", P + 130, y + 3)
+    hit:SetPoint("RIGHT", parent, "RIGHT", -P, 0)
+    hit:SetHeight(16)
+    hit:EnableMouse(true)
+
     local v = Th.Fs(parent, "data", "-", "textPrimary")
-    v:SetPoint("TOPLEFT", parent, "TOPLEFT", P + 130, y + 1)
-    v:SetPoint("RIGHT", parent, "RIGHT", -P, 0)
+    v:SetAllPoints(hit)
     v:SetJustifyH("LEFT")
     v:SetWordWrap(false)
+    v._labelText = label
+    v._tooltipFrame = hit
+    hit:SetScript("OnEnter", function()
+        local text = v._tooltipText or v:GetText()
+        text = tostring(text or "")
+        if text == "" or text == "-" then
+            return
+        end
+        GameTooltip:SetOwner(hit, "ANCHOR_CURSOR")
+        GameTooltip:AddLine(label, 1, 1, 1)
+        for _, line in ipairs(tooltipLines(text)) do
+            GameTooltip:AddLine(line, 0.95, 0.86, 0.55, true)
+        end
+        GameTooltip:Show()
+    end)
+    hit:SetScript("OnLeave", function()
+        GameTooltip:Hide()
+    end)
     return v
 end
 
@@ -291,6 +330,7 @@ function PP:Refresh()
             self.officerNoteValue, self.customNoteValue, self.locationValue, self.onlineValue,
         }) do
             fs:SetText("-")
+            setValueTooltip(fs, nil)
         end
         return
     end
@@ -305,9 +345,23 @@ function PP:Refresh()
     local tags = joinTags(live.notes and live.notes.tags or {})
     local discord = live.officerData and live.officerData.discordName or ""
     local verified = live.officerData and live.officerData.discordVerified
+    local discordStatus, discordLabel
+    if GC.Utils and GC.Utils.GetDiscordVerificationStatus then
+        discordStatus, discordLabel = GC.Utils.GetDiscordVerificationStatus(live)
+    end
     local group = GC.AltMain and GC.AltMain:GetGroup(live.key) or nil
     local mainKey = group and group.mainKey or live.main or live.key
     local connectedCount = GC.AltMain and GC.AltMain:GetConnectedCount(live.key) or 1
+    local relationshipIssues = GC.Modules.RosterRelationships and GC.Modules.RosterRelationships:GetIssuesForCharacter(live.key) or {}
+    local relationshipIssueText = relationshipIssues[1] and relationshipIssues[1].message or nil
+    local relationshipTooltip = nil
+    if relationshipIssues and #relationshipIssues > 0 then
+        local lines = {}
+        for _, issue in ipairs(relationshipIssues) do
+            lines[#lines + 1] = tostring(issue.message or "Review this character's Main / Alt links.")
+        end
+        relationshipTooltip = table.concat(lines, "\n")
+    end
 
     self.editBtn:SetEnabled(true)
     self.nameLabel:SetText(p.key or p.name or "Unknown")
@@ -318,7 +372,15 @@ function PP:Refresh()
     self.statusLabel:SetTextColor(statusColor[1], statusColor[2], statusColor[3], statusColor[4] or 1)
     self:_updatePortrait(p, live)
 
-    self.roleValue:SetText(p.classificationLabel or live.classification or "Unknown")
+    self.roleValue:SetText((p.classificationLabel or live.classification or "Unknown") .. (relationshipIssueText and " (!)" or ""))
+    setValueTooltip(self.roleValue, relationshipTooltip)
+    if relationshipIssueText then
+        local c = Th.c.textDanger
+        self.roleValue:SetTextColor(c[1], c[2], c[3], c[4] or 1)
+    else
+        local c = Th.c.textPrimary
+        self.roleValue:SetTextColor(c[1], c[2], c[3], c[4] or 1)
+    end
     self.mainValue:SetText(mainKey and mainKey ~= live.key and shortName(mainKey) or "-")
     self.altsValue:SetText(tostring(connectedCount))
     self.realmValue:SetText(p.realm or live.realm or "-")
@@ -329,8 +391,24 @@ function PP:Refresh()
     self.rankValue:SetText(p.rankName or "-")
     self.pointsValue:SetText(tostring(points))
     self.tagsValue:SetText(tags ~= "" and tags or "None")
-    self.discordValue:SetText(discord ~= "" and (verified == false and (discord .. " (not verified)") or discord) or "-")
-    self.activityValue:SetText(p.needsPrompt and "Needs classification" or "Tracked")
+    if discordStatus == "skipped" then
+        self.discordValue:SetText(discordLabel or "Skipped: Initiate")
+    elseif discordStatus == "verified" then
+        self.discordValue:SetText(discord ~= "" and (discord .. " (Verified)") or "Verified")
+    elseif verified == false and discord ~= "" then
+        self.discordValue:SetText(discord .. " (Missing Discord Verification)")
+    else
+        self.discordValue:SetText(discord ~= "" and discord or "Missing Discord Verification")
+    end
+    self.activityValue:SetText(relationshipIssueText or (p.needsPrompt and "Needs classification" or "Tracked"))
+    setValueTooltip(self.activityValue, relationshipTooltip or self.activityValue:GetText())
+    if relationshipIssueText then
+        local c = Th.c.textDanger
+        self.activityValue:SetTextColor(c[1], c[2], c[3], c[4] or 1)
+    else
+        local c = Th.c.textSecond
+        self.activityValue:SetTextColor(c[1], c[2], c[3], c[4] or 1)
+    end
 
     self.publicNoteValue:SetText(trim(live.publicNote or p.publicNote) ~= "" and trim(live.publicNote or p.publicNote) or "-")
     self.officerNoteValue:SetText(trim(live.officerNote or p.officerNote) ~= "" and trim(live.officerNote or p.officerNote) or "-")
@@ -338,6 +416,15 @@ function PP:Refresh()
 
     self.locationValue:SetText(p.locationDisplay or live.zone or "-")
     self.onlineValue:SetText(p.statusLabel or "-")
+
+    for _, fs in ipairs({
+        self.mainValue, self.altsValue, self.realmValue, self.joinValue,
+        self.firstSeenValue, self.lastSeenValue, self.rankValue, self.pointsValue,
+        self.tagsValue, self.discordValue, self.publicNoteValue, self.officerNoteValue,
+        self.customNoteValue, self.locationValue, self.onlineValue,
+    }) do
+        setValueTooltip(fs, fs:GetText())
+    end
 
     self.content:SetHeight(math.max(self.content:GetHeight() or 1, 430 + P))
 end

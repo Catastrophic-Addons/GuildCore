@@ -187,7 +187,11 @@ function BP:_removeBan()
         hideOnEscape = true,
         preferredIndex = 3,
     }
-    StaticPopup_Show("GUILDCORE_REMOVE_BAN_BOOK", nil, nil, self.selectedKey)
+    if GC.UI.FrameLayering then
+        GC.UI.FrameLayering:ShowStaticPopup("GUILDCORE_REMOVE_BAN_BOOK", nil, nil, self.selectedKey)
+    else
+        StaticPopup_Show("GUILDCORE_REMOVE_BAN_BOOK", nil, nil, self.selectedKey)
+    end
 end
 
 function BP:_matchesFilter(entry)

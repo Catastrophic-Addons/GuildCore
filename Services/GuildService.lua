@@ -98,15 +98,17 @@ local function isMissingDiscordName(player)
     return GC.Utils.Trim(discordName or "") == ""
 end
 
-local function countsForDiscordDashboard(player)
-    local rankIndex = tonumber(player and player.rankIndex)
-    if not rankIndex or rankIndex < 0 or rankIndex > 3 then
-        return false
+local function getDiscordVerificationStatus(player)
+    if GC.Utils and GC.Utils.GetDiscordVerificationStatus then
+        return GC.Utils.GetDiscordVerificationStatus(player)
     end
-    if (player.classification or "unknown") == "alt" then
-        return false
+    if GC.Utils and GC.Utils.IsInitiateRank and GC.Utils.IsInitiateRank(player and player.rankName) then
+        return "skipped", "Skipped: Initiate"
     end
-    return true
+    if player and player.officerData and player.officerData.discordVerified == true then
+        return "verified", "Verified"
+    end
+    return "missing", "Missing Discord Verification"
 end
 
 local _CLASSIFICATION_LABEL = {main = "Main",    alt = "Alt",  unknown = "Unknown"}
@@ -176,8 +178,14 @@ function GS:GetRosterList()
             entry.mainDisplay = p.main and p.main:match("^([^%-]+)") or "—"
             entry.discordVerified = p.officerData and p.officerData.discordVerified or nil
             entry.discordName = p.officerData and p.officerData.discordName or nil
+            entry.discordVerificationStatus, entry.discordVerificationLabel = getDiscordVerificationStatus(p)
             entry.specDisplay = p.specialization or nil
             entry.classSpecDisplay = entry.specDisplay and (entry.classDisplayName .. " / " .. entry.specDisplay) or entry.classDisplayName
+            local relationshipIssues = GC.Modules.RosterRelationships and GC.Modules.RosterRelationships:GetIssuesForCharacter(p.key) or {}
+            entry.relationshipIssues = relationshipIssues
+            entry.relationshipIssueCount = #(relationshipIssues or {})
+            entry.hasRelationshipIssue = entry.relationshipIssueCount > 0
+            entry.relationshipIssueText = entry.hasRelationshipIssue and relationshipIssues[1] and relationshipIssues[1].message or nil
             entry.needsPrompt = entry.classification == "unknown"
                 and p.isTrackedRank ~= false
                 and not (p.promptState and (p.promptState.dismissedAt or p.promptState.bootstrapSuppressed))
@@ -346,14 +354,18 @@ function GS:GetGuildInsights()
         missingDiscordVerification = 0,
         unlinkedCharacters = 0,
         inactiveMembers = 0,
+        rosterDataIssues = 0,
     }
+    local relationshipSummary = GC.Modules.RosterRelationships and GC.Modules.RosterRelationships:GetIssueSummary() or nil
+    counts.rosterDataIssues = relationshipSummary and relationshipSummary.characters or 0
 
     for _, player in ipairs(getActivePlayers()) do
         local normalizedRank = GC.Utils.NormalizeRankName(player.rankName)
         if normalizedRank == "initiate" then
             counts.initiatesNeedingReview = counts.initiatesNeedingReview + 1
         end
-        if countsForDiscordDashboard(player) and isMissingDiscordName(player) then
+        local discordStatus = getDiscordVerificationStatus(player)
+        if discordStatus ~= "skipped" and (discordStatus ~= "verified" or isMissingDiscordName(player)) then
             counts.missingDiscordVerification = counts.missingDiscordVerification + 1
         end
         if (player.classification or "unknown") == "unknown" then
@@ -392,6 +404,14 @@ function GS:GetNeedsAttention(limit)
 
     local activePlayers = getActivePlayers()
 
+    local relationshipCache = GC.Modules.RosterRelationships and GC.Modules.RosterRelationships:ValidateAll() or nil
+    for key, issues in pairs((relationshipCache and relationshipCache.byKey) or {}) do
+        local player = GC.Services.DataStore:GetPlayer(key)
+        if player and player.status == "active" and issues and #issues > 0 then
+            addRow(player, issues[1].message or "Roster relationship data issue", "Review Main / Alt Links", 0, "textDanger", "roster")
+        end
+    end
+
     for _, player in ipairs(activePlayers) do
         if (player.classification or "unknown") == "unknown" then
             addRow(player, "Unknown main/alt status", "Set Main / Link Alt", 1, "textAccent", "roster")
@@ -399,8 +419,9 @@ function GS:GetNeedsAttention(limit)
     end
 
     for _, player in ipairs(activePlayers) do
-        if countsForDiscordDashboard(player) and isMissingDiscordName(player) then
-            addRow(player, "Missing Discord verification", "Verify Discord", 2, "textWarn", "roster")
+        local discordStatus, discordLabel = getDiscordVerificationStatus(player)
+        if discordStatus ~= "skipped" and (discordStatus ~= "verified" or isMissingDiscordName(player)) then
+            addRow(player, discordLabel or "Missing Discord Verification", "Verify Discord", 2, "textWarn", "roster")
         end
     end
 

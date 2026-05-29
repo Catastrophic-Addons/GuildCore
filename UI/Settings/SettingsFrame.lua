@@ -191,8 +191,12 @@ function Settings:CreateDropdown(parent, y, def)
     end
     local menu = CreateFrame("Frame", nil, UIParent)
     if GC.Perf then GC.Perf:CountUI("frames", 1) end
-    menu:SetFrameStrata("TOOLTIP")
     menu:SetSize(def.width or 170, math.max(1, #(def.options or {})) * Th.btnH)
+    if GC.UI.FrameLayering then
+        GC.UI.FrameLayering:PreparePopupFrame(menu, GC.UI.MainFrame and GC.UI.MainFrame.frame, 90)
+    else
+        menu:SetFrameStrata("DIALOG")
+    end
     T().Bg(menu, T().c.panel, T().c.borderAccent)
     menu:Hide()
     for i, option in ipairs(def.options or {}) do

@@ -189,6 +189,59 @@ SlashCmdList["GUILDCORE"] = function(msg)
         return
     end
 
+    if msg == "validate-links" then
+        local relationships = GC.Modules and GC.Modules.RosterRelationships
+        if not relationships or not relationships.ValidateAll then
+            print("|cff4fd1c5Guild Core:|r Roster relationship validator is unavailable.")
+            return
+        end
+        local summary = relationships:GetIssueSummary()
+        print(string.format("|cff4fd1c5Guild Core:|r Roster relationship issues: characters=%d total=%d",
+            summary.characters or 0,
+            summary.total or 0
+        ))
+        for code, count in pairs(summary.byCode or {}) do
+            print(string.format("  %s: %d", tostring(code), tonumber(count) or 0))
+        end
+        return
+    end
+
+    if msg == "repair-links-preview" then
+        local relationships = GC.Modules and GC.Modules.RosterRelationships
+        if not relationships or not relationships.BuildRepairPreview then
+            print("|cff4fd1c5Guild Core:|r Safe alt link repair preview is unavailable.")
+            return
+        end
+        local preview = relationships:BuildRepairPreview()
+        local summary = preview.summary or {}
+        print(string.format("|cff4fd1c5Guild Core:|r Safe alt link repair preview: safe=%d manual=%d",
+            summary.safeActions or 0,
+            summary.manualReview or 0
+        ))
+        if (summary.safeActions or 0) == 0 and (summary.manualReview or 0) == 0 then
+            print("  No roster relationship issues found.")
+        elseif (summary.safeActions or 0) == 0 then
+            print("  No safe automatic repairs are available. Manual review is required.")
+        else
+            print("  Open Dashboard > Repair Alt Links to review and apply safe repairs.")
+        end
+        return
+    end
+
+    local splitTestText = msg == "messagesplittest" and "" or msg:match("^messagesplittest%s+(.+)$")
+    if splitTestText ~= nil then
+        local svc = GC.Services and GC.Services.Messages
+        if svc and svc.DebugSplitMessage then
+            if splitTestText == "" then
+                splitTestText = "Short test message. This longer sentence exists so Guild Core can show how the outbound guild message splitter keeps readable chunks under the chat limit without sending anything to guild chat."
+            end
+            svc:DebugSplitMessage(GC.Utils.Trim(splitTestText), 255)
+        else
+            print("|cff4fd1c5Guild Core:|r Messaging split test is unavailable.")
+        end
+        return
+    end
+
     if msg == "perf" then
         if GC.Perf and GC.Perf.PrintPerfSummary then
             GC.Perf:PrintPerfSummary()
@@ -460,6 +513,7 @@ SlashCmdList["GUILDCORE"] = function(msg)
         dashboard = "dashboard",
         messaging = "messaging",
         messages = "messaging",
+        help = "help",
     }
     if panelMap[msg] then
         GC.UI:Show()

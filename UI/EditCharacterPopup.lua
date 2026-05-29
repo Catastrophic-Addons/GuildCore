@@ -52,6 +52,17 @@ local function status(message, colorKey)
     end
 end
 
+local function noteEditAvailability(player)
+    if GC.Permissions and GC.Permissions.GetNoteEditAvailability then
+        return GC.Permissions:GetNoteEditAvailability(player)
+    end
+    return {
+        enabled = false,
+        protected = false,
+        reason = "Permission service is unavailable.",
+    }
+end
+
 local function addTagToBox(box, tag)
     local tags = splitTags(box:GetText() or "")
     local wanted = tag:lower()
@@ -74,7 +85,11 @@ local function showConfirm(key, text, callback)
         preferredIndex = 3,
     }
     StaticPopupDialogs[key].text = text
-    StaticPopup_Show(key, nil, nil, callback)
+    if GC.UI.FrameLayering then
+        GC.UI.FrameLayering:ShowStaticPopup(key, nil, nil, callback)
+    else
+        StaticPopup_Show(key, nil, nil, callback)
+    end
 end
 
 local function ensureLivePlayer()
@@ -194,12 +209,32 @@ function ECP:_buildGeneralPage(page)
     y = makeSection(page, "GENERAL", y)
     self.publicNoteBox = makeInput(page, "Public Note", 12, y, 500); y = y - 48
     self.officerNoteBox = makeInput(page, "Officer Note", 12, y, 500); y = y - 48
+    self.noteEditWarning = T().Fs(page, "tiny", "", "textWarn")
+    self.noteEditWarning:SetPoint("TOPLEFT", page, "TOPLEFT", 12, y + 2)
+    self.noteEditWarning:SetPoint("RIGHT", page, "RIGHT", -12, 0)
+    self.noteEditWarning:SetWordWrap(true)
+    self.noteEditWarning:Hide()
+    y = y - 22
     self.customNoteBox = makeInput(page, "Custom Note", 12, y, 500); y = y - 48
     self.discordBox = makeInput(page, "Discord Name", 12, y, 240)
     self.joinDateBox = makeInput(page, "Join Date", 272, y, 120); y = y - 48
     self.pointsBox = makeInput(page, "Points Adjustment", 12, y, 120)
     self.pointsReasonBox = makeInput(page, "Points Reason", 152, y, 360); y = y - 58
     page:SetHeight(math.abs(y) + 20)
+end
+
+function ECP:_refreshNoteEditWarning(live)
+    if not self.noteEditWarning then return end
+    local availability = noteEditAvailability(live)
+    if availability.protected then
+        self.noteEditWarning:SetText("Note edits may be blocked for " .. tostring(availability.targetRankName or (live and live.rankName) or "this rank") .. ". " .. tostring(availability.reason or "Your guild rank may not have permission to edit notes for members at this rank or higher."))
+        self.noteEditWarning:Show()
+    elseif availability.reason and availability.enabled then
+        self.noteEditWarning:SetText(availability.reason)
+        self.noteEditWarning:Show()
+    else
+        self.noteEditWarning:Hide()
+    end
 end
 
 function ECP:_buildAltPage(page)
@@ -255,7 +290,11 @@ function ECP:_buildAltPage(page)
     self.addAltDropdown = CreateFrame("Frame", nil, page)
     self.addAltDropdown:SetPoint("TOPLEFT", self.addAltBox, "BOTTOMLEFT", 0, -4)
     self.addAltDropdown:SetSize(410, 240)
-    self.addAltDropdown:SetFrameLevel(page:GetFrameLevel() + 20)
+    if GC.UI.FrameLayering then
+        GC.UI.FrameLayering:PrepareChildPopupFrame(self.addAltDropdown, page, 20)
+    else
+        self.addAltDropdown:SetFrameLevel(page:GetFrameLevel() + 20)
+    end
     T().Bg(self.addAltDropdown, T().c.panel, T().c.borderAccent)
     self.addAltDropdown:Hide()
     self.addAltResults = {}
@@ -287,17 +326,21 @@ function ECP:_buildAltPage(page)
         self:ClearFocus()
         ECP.addAltDropdown:Hide()
     end)
-    y = y - 64
+    y = y - 84
 
     y = makeSection(page, "ROLE ACTIONS", y)
     self.roleActionsY = y
-    self.mainBtn = GC.UI.Button.Create(page, "Mark Current as Main", "secondary", 150, T().btnH)
+    self.mainBtn = GC.UI.Button.Create(page, "Mark as Main", "secondary", 120, T().btnH)
     self.mainBtn:SetPoint("TOPLEFT", page, "TOPLEFT", 12, y)
     self.mainBtn:SetScript("OnClick", function() markPendingAction("main", "Mark as Main") end)
-    self.unknownBtn = GC.UI.Button.Create(page, "Mark Current Unknown", "secondary", 160, T().btnH)
-    self.unknownBtn:SetPoint("LEFT", self.mainBtn, "RIGHT", 8, 0)
+    self.altBtn = GC.UI.Button.Create(page, "Mark as Alt", "secondary", 120, T().btnH)
+    self.altBtn:SetPoint("LEFT", self.mainBtn, "RIGHT", 8, 0)
+    self.altBtn:SetTooltip("Mark as Alt", "Enter or select the target main in Add Alt, then click this button.")
+    self.altBtn:SetScript("OnClick", function() ECP:_queueMarkCurrentAlt() end)
+    self.unknownBtn = GC.UI.Button.Create(page, "Mark Unknown", "secondary", 120, T().btnH)
+    self.unknownBtn:SetPoint("LEFT", self.altBtn, "RIGHT", 8, 0)
     self.unknownBtn:SetScript("OnClick", function() markPendingAction("unknown", "Mark as Unknown") end)
-    self.unlinkCurrentBtn = GC.UI.Button.Create(page, "Remove Current Link", "danger", 150, T().btnH)
+    self.unlinkCurrentBtn = GC.UI.Button.Create(page, "Remove Link", "danger", 112, T().btnH)
     self.unlinkCurrentBtn:SetPoint("LEFT", self.unknownBtn, "RIGHT", 8, 0)
     self.unlinkCurrentBtn:SetScript("OnClick", function()
         showConfirm("GUILDCORE_EDIT_CHARACTER_UNLINK_CURRENT", "Queue removal of the alt link for the current character?", function()
@@ -645,7 +688,11 @@ function ECP:_showMainPicker(mainKeys, onPick)
         local frame = CreateFrame("Frame", "GuildCoreAltMainPicker", UIParent)
         frame:SetSize(360, 120)
         frame:SetPoint("CENTER")
-        frame:SetFrameStrata("DIALOG")
+        if GC.UI.FrameLayering then
+            GC.UI.FrameLayering:PreparePopupFrame(frame, self.frame or (GC.UI.MainFrame and GC.UI.MainFrame.frame), 90)
+        else
+            frame:SetFrameStrata("DIALOG")
+        end
         frame:EnableMouse(true)
         frame:SetClampedToScreen(true)
         T().Bg(frame, T().c.panel, T().c.borderAccent)
@@ -801,6 +848,31 @@ function ECP:_queueAddAlt()
     self:_queueAltGroup(mains[1] or live.key, keys)
 end
 
+function ECP:_queueMarkCurrentAlt()
+    local live = ensureLivePlayer()
+    if not live or not draft then return end
+
+    local mainKey = self:_resolveAddAltKey(self.addAltBox and self.addAltBox:GetText() or "")
+    if not mainKey then
+        self:_setAddAltValidation("Enter or select the target main in Add Alt before marking this character as Alt.")
+        status("Choose a target main first.", "textWarn")
+        return
+    end
+    if mainKey == live.key then
+        self:_setAddAltValidation("A character cannot be its own main.")
+        return
+    end
+    if not activeRosterPlayer(mainKey) then
+        self:_setAddAltValidation("Target main is not in the active roster cache.")
+        return
+    end
+
+    draft.mainOverride = mainKey
+    markPendingAction("alt", "Mark as Alt")
+    self:_setAddAltValidation("Queued current character as an Alt of " .. tostring(mainKey) .. ". Click Save to apply.")
+    self:_refreshAltDisplay(live)
+end
+
 function ECP:_queueRemoveLinkedAlt(altKey)
     if not draft or not altKey then return end
     if draft.addAltKeys and draft.addAltKeys[altKey] then
@@ -859,7 +931,11 @@ function ECP:_showLinkedAltMenu(altKey)
     if not self.linkedAltMenu then
         local menu = CreateFrame("Frame", "GuildCoreEditCharacterAltMenu", UIParent)
         menu:SetSize(170, 98)
-        menu:SetFrameStrata("DIALOG")
+        if GC.UI.FrameLayering then
+            GC.UI.FrameLayering:PreparePopupFrame(menu, self.frame or (GC.UI.MainFrame and GC.UI.MainFrame.frame), 95)
+        else
+            menu:SetFrameStrata("DIALOG")
+        end
         menu:SetClampedToScreen(true)
         T().Bg(menu, T().c.panel, T().c.borderAccent)
         menu.buttons = {}
@@ -1030,31 +1106,21 @@ function ECP:_refreshAltDisplay(live)
     end
 
     if self.mainBtn then
-        local showMain = live.classification ~= "main"
-        self.mainBtn:SetShown(showMain)
+        self.mainBtn:SetShown(true)
+        self.mainBtn:SetEnabled(effectiveMain ~= live.key or live.classification ~= "main")
+    end
+    if self.altBtn then
+        self.altBtn:SetShown(true)
+        self.altBtn:SetEnabled(true)
     end
     if self.unknownBtn then
-        local showMain = self.mainBtn and self.mainBtn:IsShown()
-        local showUnknown = live.classification ~= "unknown"
-        self.unknownBtn:SetShown(showUnknown)
-        self.unknownBtn:ClearAllPoints()
-        if showMain then
-            self.unknownBtn:SetPoint("LEFT", self.mainBtn, "RIGHT", 8, 0)
-        else
-            self.unknownBtn:SetPoint("TOPLEFT", self.altPageContent, "TOPLEFT", 12, self.roleActionsY or -1)
-        end
+        self.unknownBtn:SetShown(true)
+        self.unknownBtn:SetEnabled(live.classification ~= "unknown")
     end
     if self.unlinkCurrentBtn then
-        local showUnknown = self.unknownBtn and self.unknownBtn:IsShown()
         self.unlinkCurrentBtn:SetShown(effectiveMain ~= live.key)
         self.unlinkCurrentBtn:ClearAllPoints()
-        if showUnknown then
-            self.unlinkCurrentBtn:SetPoint("LEFT", self.unknownBtn, "RIGHT", 8, 0)
-        elseif self.mainBtn and self.mainBtn:IsShown() then
-            self.unlinkCurrentBtn:SetPoint("LEFT", self.mainBtn, "RIGHT", 8, 0)
-        else
-            self.unlinkCurrentBtn:SetPoint("TOPLEFT", self.altPageContent, "TOPLEFT", 12, self.roleActionsY or -1)
-        end
+        self.unlinkCurrentBtn:SetPoint("LEFT", self.unknownBtn, "RIGHT", 8, 0)
     end
 end
 
@@ -1068,8 +1134,8 @@ function ECP:Create()
     frame:EnableMouse(true)
     frame:RegisterForDrag("LeftButton")
     frame:SetClampedToScreen(true)
-    if GC.UI.Layering then
-        GC.UI.Layering:ApplyPopup(frame, GC.UI.MainFrame and GC.UI.MainFrame.frame, 70)
+    if GC.UI.FrameLayering then
+        GC.UI.FrameLayering:PreparePopupFrame(frame, GC.UI.MainFrame and GC.UI.MainFrame.frame, 70)
     else
         frame:SetFrameStrata("DIALOG")
     end
@@ -1184,6 +1250,7 @@ function ECP:Open(player)
     self:_refreshAltDisplay(live)
     self:_refreshHistory(live)
     self:_refreshOfficerActionViews(live)
+    self:_refreshNoteEditWarning(live)
 
     self.frame:Show()
     self:_setTab("general")
@@ -1252,6 +1319,10 @@ function ECP:_applyPendingAction(live)
     if not action then return true end
     if action == "main" then
         return GC.Services.Alts:SetMain(live.key, "edit-character")
+    elseif action == "alt" then
+        local mainKey = draft and draft.mainOverride
+        if not mainKey then return false, "Choose a target main before marking this character as Alt." end
+        return GC.Services.Alts:SetAlt(live.key, mainKey, "edit-character")
     elseif action == "unknown" then
         return GC.Services.Alts:SetUnknown(live.key, "edit-character")
     elseif action == "unlink" then
@@ -1261,38 +1332,18 @@ function ECP:_applyPendingAction(live)
         local mainPlayer = activeRosterPlayer(mainKey)
         if not mainPlayer then return false, "Selected main character is not in the active roster cache." end
 
-        if mainPlayer.classification ~= "main" then
-            local ok, err = GC.Services.Alts:SetMain(mainKey, "edit-character")
-            if not ok then return false, err end
-        end
-
-        -- When merging two existing relationship groups, former mains may own
-        -- alts today. Clear those child links first so the chosen main can own
-        -- the rebuilt group without triggering the "alt cannot own alts" guard.
-        for _, altKey in ipairs(draft.addAltOrder or {}) do
-            if altKey ~= mainKey then
-                local altPlayer = activeRosterPlayer(altKey)
-                for _, childKey in ipairs((altPlayer and altPlayer.alts) or {}) do
-                    local child = DS():GetPlayer(childKey)
-                    if child and child.main == altKey then
-                        local ok, err = GC.Services.Alts:UnlinkAlt(childKey, "edit-character")
-                        if not ok then return false, err end
-                    end
-                end
-            end
-        end
-
+        local groupKeys = {}
         for _, altKey in ipairs(draft.addAltOrder or {}) do
             if altKey ~= mainKey then
                 local altPlayer = activeRosterPlayer(altKey)
                 if not altPlayer then
                     return false, tostring(altKey) .. " is not in the active roster cache."
                 end
-                local ok, err = GC.Services.Alts:SetAlt(altKey, mainKey, "edit-character")
-                if not ok then return false, err end
+                groupKeys[#groupKeys + 1] = altKey
             end
         end
-        return true
+
+        return GC.Services.Alts:NormalizeGroup(mainKey, groupKeys, "edit-character")
     end
     return true
 end
@@ -1313,22 +1364,43 @@ function ECP:Save()
         if GC.UI.PlayerPanel then GC.UI.PlayerPanel:Refresh() end
         if GC.UI.RosterPanel then GC.UI.RosterPanel:Refresh() end
         if GC.UI.BanBookPanel and GC.UI.BanBookPanel.Refresh then GC.UI.BanBookPanel:Refresh() end
+        if GC.UI.Dashboard and GC.UI.Dashboard.Refresh then GC.UI.Dashboard:Refresh() end
         status("Character changes saved.", "textSuccess")
         self:Cancel()
     end
 
-    local action = draft and draft.pendingAction
-    local hasAltRemovals = self:_hasQueuedAltRemovals()
-    local hasAltAdds = self:_hasQueuedAltAdds()
-    if action == "addAlt" then
-        local mainKey = draft and draft.mainOverride or live.key
-        local count = draft and draft.addAltOrder and #draft.addAltOrder or 0
-        showConfirm("GUILDCORE_EDIT_CHARACTER_LINKS", "Link " .. tostring(count) .. " alt" .. (count == 1 and "" or "s") .. " under " .. tostring(mainKey) .. "?", applyAll)
+    local function continueWithActionConfirm()
+        local action = draft and draft.pendingAction
+        local hasAltRemovals = self:_hasQueuedAltRemovals()
+        local hasAltAdds = self:_hasQueuedAltAdds()
+        if action == "addAlt" then
+            local mainKey = draft and draft.mainOverride or live.key
+            local count = draft and draft.addAltOrder and #draft.addAltOrder or 0
+            showConfirm("GUILDCORE_EDIT_CHARACTER_LINKS", "Link " .. tostring(count) .. " alt" .. (count == 1 and "" or "s") .. " under " .. tostring(mainKey) .. "?", applyAll)
+            return
+        end
+        if action == "main" or action == "alt" or action == "unknown" or action == "unlink" or hasAltRemovals or hasAltAdds then
+            showConfirm("GUILDCORE_EDIT_CHARACTER_LINKS", "Apply main/alt change for " .. tostring(live.key or live.name) .. "?", applyAll)
+            return
+        end
+        applyAll()
+    end
+
+    local publicNote = self.publicNoteBox:GetText() or ""
+    local officerNote = self.officerNoteBox:GetText() or ""
+    local noteChanged = publicNote ~= (live.publicNote or "") or officerNote ~= (live.officerNote or "")
+    local noteAvailability = noteEditAvailability(live)
+    if noteChanged and noteAvailability.protected then
+        -- This warning is separate from rank action permissions. Blizzard may
+        -- silently reject note edits against same-rank or higher-rank members,
+        -- so the save path verifies the note after attempting the write.
+        showConfirm(
+            "GUILDCORE_EDIT_CHARACTER_NOTE_PROTECTED",
+            "This character is at your guild rank or higher. Note edits may not be allowed. Try to save anyway?",
+            continueWithActionConfirm
+        )
         return
     end
-    if action == "main" or action == "unknown" or action == "unlink" or hasAltRemovals or hasAltAdds then
-        showConfirm("GUILDCORE_EDIT_CHARACTER_LINKS", "Apply main/alt change for " .. tostring(live.key or live.name) .. "?", applyAll)
-        return
-    end
-    applyAll()
+
+    continueWithActionConfirm()
 end

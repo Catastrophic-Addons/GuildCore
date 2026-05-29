@@ -52,10 +52,13 @@ function API.NormalizePlayerName(name, fallbackRealm)
     return string.format("%s-%s", shortName, normalizeRealmName(realm or fallbackRealm))
 end
 
-function API.FormatNameForGuildInvite(name)
+function API.FormatNameForGuildInvite(name, fallbackRealm)
     local shortName, realm = splitPlayerName(name)
     if not shortName or shortName == "" then
         return nil
+    end
+    if realm or fallbackRealm then
+        realm = normalizeRealmName(realm or fallbackRealm)
     end
 
     if realm and realm == normalizeRealmName() then
@@ -65,8 +68,8 @@ function API.FormatNameForGuildInvite(name)
     return realm and string.format("%s-%s", shortName, realm) or shortName
 end
 
-function API.GuildInvite(name)
-    local inviteName = API.FormatNameForGuildInvite(name)
+function API.GuildInvite(name, realm)
+    local inviteName = API.FormatNameForGuildInvite(name, realm)
     if not inviteName then
         return false, "No player name supplied."
     end
@@ -74,7 +77,7 @@ function API.GuildInvite(name)
     -- Ban Book is the final shared guard for every current and future guild
     -- invite path routed through Guild Core.
     if GC.BanBook and GC.BanBook.InviteBlockMessage then
-        local message, entry = GC.BanBook:InviteBlockMessage(name)
+        local message, entry = GC.BanBook:InviteBlockMessage(name, realm)
         if message then
             GC:InviteDebug("warn", "Skipped banned character:", tostring(entry and entry.key or name))
             return false, message
@@ -246,6 +249,12 @@ function API.SendGuildMessage(message)
     if type(message) ~= "string" or message == "" then
         return false, "Guild message is empty."
     end
+
+    local messages = GC.Services and GC.Services.Messages
+    if messages and messages.QueueGuildMessage then
+        return messages:QueueGuildMessage(message, { autoSend = true })
+    end
+
     if not SendChatMessage then
         return false, "SendChatMessage is unavailable."
     end
@@ -254,7 +263,6 @@ function API.SendGuildMessage(message)
     if not ok then
         return false, tostring(err)
     end
-
     return true
 end
 
@@ -346,38 +354,75 @@ function API.FindGuildRosterGuid(name)
     return nil
 end
 
+function API.GetGuildMemberNote(name, officer)
+    local index = API.FindGuildRosterIndex(name)
+    if not index then
+        return nil, "Guild roster entry was not found."
+    end
+
+    local _, _, _, _, _, _, publicNote, officerNote = API.GetGuildRosterInfo(index)
+    local value = officer and officerNote or publicNote
+    return tostring(value or "")
+end
+
 function API.SetGuildMemberNote(name, note, officer)
     local index = API.FindGuildRosterIndex(name)
     if not index then
         return false, "Guild roster entry was not found."
     end
     note = tostring(note or "")
+    local beforeNote = API.GetGuildMemberNote(name, officer)
+    if beforeNote == note then
+        return true
+    end
 
     local missingModernGuid = false
+    local attempted = false
     if C_GuildInfo and C_GuildInfo.SetNote then
         local guid = API.FindGuildRosterGuid(name)
         if guid then
             local ok, err = pcall(C_GuildInfo.SetNote, guid, note, officer ~= true)
-            if ok then
-                return true
+            if not ok then
+                return false, tostring(err)
             end
+            attempted = true
+        else
+            missingModernGuid = true
+        end
+    end
+
+    if not attempted then
+        local fn = officer and GuildRosterSetOfficerNote or GuildRosterSetPublicNote
+        if not fn then
+            if missingModernGuid then
+                return false, "Guild roster GUID was unavailable. Refresh the roster and try again."
+            end
+            return false, officer and "Officer note API is unavailable." or "Public note API is unavailable."
+        end
+        local ok, err = pcall(fn, index, note)
+        if not ok then
             return false, tostring(err)
         end
-        missingModernGuid = true
+        attempted = true
     end
 
-    local fn = officer and GuildRosterSetOfficerNote or GuildRosterSetPublicNote
-    if fn then
-        local ok, err = pcall(fn, index, note)
-        if ok then return true end
-        return false, tostring(err)
+    if attempted and API.GuildRoster then
+        API.GuildRoster()
     end
 
-    if missingModernGuid then
-        return false, "Guild roster GUID was unavailable. Refresh the roster and try again."
+    local afterNote, readErr = API.GetGuildMemberNote(name, officer)
+    if afterNote == note then
+        return true
     end
 
-    return false, officer and "Officer note API is unavailable." or "Public note API is unavailable."
+    -- Protected note calls can fail silently when the target is at the same
+    -- guild rank or higher. Re-read the roster note so the UI does not report
+    -- a successful save that Blizzard rejected.
+    if afterNote ~= nil then
+        return false, "Unable to update this character's note. Your guild rank may not have permission to edit notes for members at this rank or higher."
+    end
+
+    return false, readErr or "Unable to verify that the guild note was saved."
 end
 
 function API.GetItemInfo(item)

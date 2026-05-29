@@ -112,43 +112,15 @@ function I:GetSendCooldownRemaining()
 end
 
 function I:_ScheduleAutoSendTick(delay)
-    local token = self._autoSendToken
-    if self._autoSendTimer and self._autoSendTimer.Cancel then
-        self._autoSendTimer:Cancel()
-    end
-
-    self._autoSendTimer = C_Timer.NewTimer(delay, function()
-        if not self._autoSendActive or self._autoSendToken ~= token then
-            return
-        end
-
-        if not self:IsEnabled() then
-            self:StopAutoSend("disabled")
-            return
-        end
-
-        local ok, err = self:SendNextQueuedMessage()
-        if ok then
-            if self:GetQueueSize() == 0 then
-                self:StopAutoSend("complete")
-            else
-                self:_ScheduleAutoSendTick(self:GetAutoSendDelaySeconds())
+    if C_Timer and C_Timer.After then
+        C_Timer.After(delay or 0, function()
+            if self._autoSendActive then
+                self:ProcessQueue()
             end
-            return
-        end
-
-        if err == "Queue is empty." then
-            self:StopAutoSend("complete")
-            return
-        end
-
-        if err and err:find("Please wait", 1, true) then
-            self:_ScheduleAutoSendTick(math.max(self:GetAutoSendDelaySeconds(), SEND_COOLDOWN_SECONDS))
-            return
-        end
-
-        self:StopAutoSend("error")
-    end)
+        end)
+    else
+        self:ProcessQueue()
+    end
 end
 
 function I:StartAutoSend()
@@ -159,7 +131,7 @@ function I:StartAutoSend()
 
     self._autoSendToken  = (self._autoSendToken or 0) + 1
     self._autoSendActive = true
-    self:_ScheduleAutoSendTick(0)
+    self:ProcessQueue()
     return true
 end
 

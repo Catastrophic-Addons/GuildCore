@@ -5,11 +5,16 @@ local GC = ns.GuildCore
 GC.Permissions = {}
 
 function GC.Permissions:GetPlayerGuildRankIndex()
+    local guildRankIndex = self:GetPlayerGuildRankInfo()
+    return guildRankIndex
+end
+
+function GC.Permissions:GetPlayerGuildRankInfo()
     local guildName, guildRankName, guildRankIndex = GetGuildInfo("player")
     if not guildName then
         return nil
     end
-    return guildRankIndex
+    return guildRankIndex, guildRankName
 end
 
 function GC.Permissions:IsOfficerOrBetter()
@@ -60,6 +65,51 @@ function GC.Permissions:CanManageRankIndex(targetRankIndex)
     end
 
     return true
+end
+
+function GC.Permissions:GetNoteEditAvailability(target)
+    if not self:IsOfficerOrBetter() then
+        return {
+            enabled = false,
+            protected = false,
+            reason = "Officer permission required.",
+        }
+    end
+
+    local actorRankIndex, actorRankName = self:GetPlayerGuildRankInfo()
+    local targetRankIndex = tonumber(target and target.rankIndex)
+    local targetRankName = target and target.rankName
+    if (targetRankIndex == nil or targetRankName == nil) and target and GC.API and GC.API.FindGuildRosterIndex and GC.API.GetGuildRosterInfo then
+        local rosterIndex = GC.API.FindGuildRosterIndex(target.key or target.name)
+        if rosterIndex then
+            local _, rosterRankName, rosterRankIndex = GC.API.GetGuildRosterInfo(rosterIndex)
+            targetRankIndex = targetRankIndex or tonumber(rosterRankIndex)
+            targetRankName = targetRankName or rosterRankName
+        end
+    end
+    if actorRankIndex == nil or targetRankIndex == nil then
+        return {
+            enabled = true,
+            protected = false,
+            actorRankName = actorRankName,
+            targetRankName = targetRankName,
+            reason = "Guild rank data unavailable; Blizzard will validate note permissions when saving.",
+        }
+    end
+
+    -- WoW rankIndex is 0 = Guild Master/highest. Note editing is checked
+    -- independently from promote/demote permissions; same-rank or higher-rank
+    -- targets may be protected by Blizzard even when other officer actions exist.
+    local protected = targetRankIndex <= actorRankIndex
+    return {
+        enabled = not protected,
+        protected = protected,
+        actorRankIndex = actorRankIndex,
+        actorRankName = actorRankName,
+        targetRankIndex = targetRankIndex,
+        targetRankName = targetRankName,
+        reason = protected and "Your guild rank may not have permission to edit notes for members at this rank or higher." or nil,
+    }
 end
 
 function GC.Permissions:CanPromoteRankIndex(targetRankIndex)

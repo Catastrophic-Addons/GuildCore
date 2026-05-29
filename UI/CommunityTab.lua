@@ -58,6 +58,9 @@ function CT:Reposition()
 
     self.button:SetShown(parent:IsShown())
     ensureHooks(parent)
+    if GC.UI.FrameLayering then
+        GC.UI.FrameLayering:AttachBlizzardFocusHandlers()
+    end
 end
 
 function CT:Create()

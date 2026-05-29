@@ -35,6 +35,15 @@ local STATUS_ORDER = {
     Offline = 2,
 }
 
+local RANK_COLORS = {
+    officer = "textAccent",
+    veteran = "textSuccess",
+    raider = "statusActive",
+    ["mythic +"] = "textWarn",
+    member = "textSecond",
+    initiate = "textWarn",
+}
+
 local function lowerText(value)
     return tostring(value or ""):lower()
 end
@@ -108,6 +117,22 @@ local COLS = {
 
 local function buildRow(row, item)
     local Th = T()
+    row._tooltipTitle = nil
+    row._tooltipText = nil
+    if item.hasRelationshipIssue then
+        row._tooltipTitle = "Roster Data Issue"
+        local issueLines = {}
+        for i, issue in ipairs(item.relationshipIssues or {}) do
+            if i > 3 then break end
+            issueLines[#issueLines + 1] = tostring(issue.message or "Review this character's Main / Alt links.")
+        end
+        local extra = (item.relationshipIssueCount or 0) - #issueLines
+        if extra > 0 then
+            issueLines[#issueLines + 1] = "+" .. tostring(extra) .. " more issue" .. (extra == 1 and "" or "s")
+        end
+        row._tooltipText = #issueLines > 0 and table.concat(issueLines, "\n") or "Review this character's Main / Alt links."
+    end
+
     if not row._cols then
         row._cols = {}
         for i, col in ipairs(COLS) do
@@ -126,18 +151,27 @@ local function buildRow(row, item)
             fs:ClearAllPoints()
             fs:SetPoint("LEFT", (item._groupIndent and 24 or col.x), 0)
             fs:SetWidth(item._groupIndent and (col.w - 14) or col.w)
-            local rgb = item.classRGB or {1, 1, 1}
+            local rgb = item.hasRelationshipIssue and Th.c.textDanger
+                or item.isOnline and (item.classRGB or {1, 1, 1})
+                or Th.c.textDimmed
             fs:SetTextColor(rgb[1], rgb[2], rgb[3], 1)
-            fs:SetText(val)
+            fs:SetText((item.hasRelationshipIssue and "! " or "") .. val)
         elseif col.field == "classificationBadge" then
-            local badgeColor = item.classification == "main" and Th.c.textAccent
+            local badgeColor = item.hasRelationshipIssue and Th.c.textDanger
+                or item.classification == "main" and Th.c.statusActive
                 or item.classification == "alt" and Th.c.textWarn
                 or item.needsPrompt and Th.c.textDanger
                 or Th.c.textDimmed
             fs:SetTextColor(badgeColor[1], badgeColor[2], badgeColor[3], badgeColor[4] or 1)
             fs:SetText(val)
+        elseif col.field == "rankShort" then
+            local rankKey = GC.Utils.NormalizeRankName(item.rankName or "")
+            local c = Th.c[RANK_COLORS[rankKey] or "textSecond"] or Th.c.textSecond
+            if not item.isOnline then c = Th.c.textDimmed end
+            fs:SetTextColor(c[1], c[2], c[3], c[4] or 1)
+            fs:SetText(val)
         elseif col.field == "classSpecDisplay" then
-            local rgb = item.classRGB or Th.c.textDimmed
+            local rgb = item.isOnline and (item.classRGB or Th.c.textDimmed) or Th.c.textDimmed
             fs:SetTextColor(rgb[1] * 0.9, rgb[2] * 0.9, rgb[3] * 0.9, 1)
             fs:SetText(val)
         elseif col.field == "statusLabel" then
@@ -252,8 +286,18 @@ local function matchesDashboardFilter(item, filterKey)
     if filterKey == "unknown_main_alt" then
         return (item.classification or "unknown") == "unknown"
     end
+    if filterKey == "relationship_issues" then
+        return item.hasRelationshipIssue == true
+    end
     if filterKey == "missing_discord" then
-        return item.discordVerified ~= true or GC.Utils.Trim(item.discordName or "") == ""
+        local discordStatus = item.discordVerificationStatus
+        if not discordStatus and GC.Utils and GC.Utils.GetDiscordVerificationStatus then
+            discordStatus = GC.Utils.GetDiscordVerificationStatus(item)
+        end
+        local discordName = item.discordName or ""
+        local trimDiscord = GC.Utils and GC.Utils.Trim and GC.Utils.Trim(discordName) or tostring(discordName):match("^%s*(.-)%s*$")
+        return discordStatus ~= "skipped"
+            and (discordStatus ~= "verified" or trimDiscord == "")
     end
     if filterKey == "initiates" then
         return GC.Utils.NormalizeRankName(item.rankName) == "initiate"
@@ -478,6 +522,15 @@ function RP:Create(parent)
         local mf = GC.UI.MainFrame
         if mf then
             mf:SetStatus(ok and "Roster scan requested…" or (err or "Unable to scan."), ok and "textWarn" or "textDanger")
+        end
+    end)
+
+    local importBtn = GC.UI.Button.Create(frame, "Import GRM", "secondary", 96, Th.btnH)
+    importBtn:SetPoint("LEFT", refreshBtn, "RIGHT", P/2, 0)
+    importBtn:SetTooltip("Import GRM Export", "Paste a Guild Roster Manager export and preview safe local metadata updates.")
+    importBtn:SetScript("OnClick", function()
+        if GC.UI.GRMImportPopup then
+            GC.UI.GRMImportPopup:Open()
         end
     end)
 
@@ -717,8 +770,11 @@ function RP:ApplyDashboardFilter(filterKey)
     self._dashboardFilter = filterKey ~= "all" and filterKey or nil
     self.filters = self.filters or {}
     self.filters.onlineOnly = filterKey == "online"
+    self.filters.letter = nil
+    self.filters.searchText = ""
     if self.searchBox then self.searchBox:SetText("") end
     saveRosterSetting("onlineOnly", self.filters.onlineOnly)
+    saveRosterSetting("lastLetterFilter", nil)
     self:ApplyFilters()
 end
 
