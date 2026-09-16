@@ -5,7 +5,7 @@ local function T() return GC.UI.Theme end
 GC.Settings:RegisterCategory({
     id = "appearance",
     label = "Appearance",
-    keywords = "theme font scale compact roster row height accent preview",
+    keywords = "theme font text size accessibility readable large scale compact roster row height accent preview vision",
     build = function(S, parent, y)
         y = select(2, S:CreateSection(parent, "Theme", y))
         local themeOptions = {}
@@ -21,7 +21,7 @@ GC.Settings:RegisterCategory({
         })
         local fontOptions = {}
         for _, key in ipairs(T().GetFontThemeKeys()) do
-            fontOptions[#fontOptions + 1] = { key = key, label = key }
+            fontOptions[#fontOptions + 1] = { key = key, label = T().GetFontThemeLabel and T().GetFontThemeLabel(key) or key }
         end
         _, y = S:CreateDropdown(parent, y, {
             key = "fontTheme", label = "Font Theme", description = "Choose the typography set used across the addon.",
@@ -30,9 +30,25 @@ GC.Settings:RegisterCategory({
                 if GC.UI.MainFrame and GC.UI.MainFrame.ApplyTheme then GC.UI.MainFrame:ApplyTheme() end
             end
         })
-        _, y = S:CreateToggle(parent, y, { key = "compactMode", label = "Compact UI", description = "Reserved for denser future layouts.", default = false })
-        _, y = S:CreateInput(parent, y, { key = "uiScale", label = "UI Scale", description = "Preferred scale for future frame sizing controls.", numeric = true, min = 0.75, max = 1.4, default = 1 })
-        _, y = S:CreateInput(parent, y, { key = "rosterRowHeight", label = "Roster Row Height", description = "Preferred roster row height for future roster density options.", numeric = true, min = 28, max = 48, default = 36 })
+        _, y = S:CreateDropdown(parent, y, {
+            key = "textScale", label = "Text Size", description = "Increase text throughout Guild Core without enlarging the entire window.",
+            options = {
+                { key = 1, label = "Default" },
+                { key = 1.15, label = "Large" },
+                { key = 1.3, label = "Extra Large" },
+            },
+            default = 1,
+            onChange = function(value)
+                T().SetTextScale(value)
+                if GC.UI.MainFrame and GC.UI.MainFrame.ApplyTheme then GC.UI.MainFrame:ApplyTheme() end
+            end,
+        })
+        _, y = S:CreateInput(parent, y, {
+            key = "uiScale", label = "UI Scale", description = "Scale the Guild Core window while preserving its layout.",
+            numeric = true, min = 0.75, max = 1.25, default = 1, onChange = function()
+                if GC.UI.MainFrame and GC.UI.MainFrame.ApplyScale then GC.UI.MainFrame:ApplyScale() end
+            end,
+        })
         y = select(2, S:CreateSection(parent, "Live Preview", y))
         local preview = CreateFrame("Frame", nil, parent)
         preview:SetPoint("TOPLEFT", parent, "TOPLEFT", 0, y)

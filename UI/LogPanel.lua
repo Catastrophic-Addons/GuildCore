@@ -360,7 +360,7 @@ function LP:Create(parent)
             })
         end
     end)
-    self.list:SetEmptyText("No log entries for this filter.")
+    self.list:SetEmptyText("No activity matches this view.")
 
     self:_updateFilterButtons()
     self:_updateSortButtons()
@@ -369,24 +369,19 @@ end
 -- ─── internal ─────────────────────────────────
 
 function LP:_updateFilterButtons()
-    local Th = T()
     for id, btn in pairs(self._filterBtns) do
         local active = (id == self._activeFilter)
-        -- Swap between primary (active) and secondary (inactive) visuals
-        if btn._bg then
-            local c = active and Th.c.btnPrimary or Th.c.btnSecond
-            btn._bg:SetColorTexture(c[1], c[2], c[3], c[4] or 1)
+        if btn.SetActive then
+            btn:SetActive(active)
         end
     end
 end
 
 function LP:_updateSortButtons()
-    local Th = T()
     for id, btn in pairs(self._sortBtns or {}) do
         local active = id == (self._sortMode or "date")
-        if btn._bg then
-            local c = active and Th.c.btnPrimary or Th.c.btnSecond
-            btn._bg:SetColorTexture(c[1], c[2], c[3], c[4] or 1)
+        if btn.SetActive then
+            btn:SetActive(active)
         end
     end
 end
@@ -455,7 +450,7 @@ function LP:_applyFilter()
         if cat == "ranks" then
             self.list:SetEmptyText("No promotions or demotions recorded since tracking began.")
         else
-            self.list:SetEmptyText("No log entries for " .. selectedLabel .. ".")
+            self.list:SetEmptyText("No activity for " .. selectedLabel .. ".")
         end
     end
     self.list:Refresh(filtered)

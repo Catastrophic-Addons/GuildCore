@@ -97,6 +97,10 @@ function API.GuildInvite(name, realm)
     return true
 end
 
+function API.SupportsCrossRealmGuildInvites()
+    return WOW_PROJECT_ID == WOW_PROJECT_MAINLINE
+end
+
 function API.SetWhoToUi(enabled)
     if C_FriendList and C_FriendList.SetWhoToUi then
         return C_FriendList.SetWhoToUi(enabled and true or false)
@@ -113,9 +117,8 @@ function API.SendWho(query)
         return false, "C_FriendList.SendWho is unavailable."
     end
 
-    -- Requires in-game testing: C_FriendList.SendWho is documented as NOT
-    -- hardware-event restricted on Retail (unlike spell casts), but may be
-    -- throttled server-side. Use pcall to capture any unexpected Lua errors.
+    -- SendWho is restricted on current Retail builds. Callers must enter here
+    -- from a direct user action and manually advance follow-up queries.
     local ok, err = pcall(C_FriendList.SendWho, query)
     if not ok then
         -- Surface the exact error so it appears in the addon error log.

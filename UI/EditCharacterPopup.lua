@@ -192,6 +192,115 @@ local function makeSection(parent, title, y)
     return y - 38, lbl
 end
 
+local function createRankDropdown(parent, width)
+    local Th = T()
+    local btn = CreateFrame("Button", nil, parent)
+    btn:SetSize(width or 220, Th.btnH)
+    Th.Bg(btn, Th.c.panelAlt, Th.c.borderStrong)
+
+    local label = Th.Fs(btn, "data", "Choose target rank", "textPrimary")
+    label:SetPoint("LEFT", 8, 0)
+    label:SetPoint("RIGHT", btn, "RIGHT", -22, 0)
+    label:SetJustifyH("LEFT")
+    btn._label = label
+
+    local arrow = Th.Fs(btn, "small", "v", "textAccent")
+    arrow:SetPoint("RIGHT", -8, 0)
+    btn._arrow = arrow
+
+    local menu = CreateFrame("Frame", nil, UIParent)
+    menu:SetWidth(width or 220)
+    if GC.UI.FrameLayering then
+        GC.UI.FrameLayering:PreparePopupFrame(menu, GC.UI.EditCharacterPopup and GC.UI.EditCharacterPopup.frame, 90)
+    else
+        menu:SetFrameStrata("DIALOG")
+        menu:SetFrameLevel(240)
+    end
+    Th.Bg(menu, Th.c.panel, Th.c.borderAccent)
+    menu:Hide()
+    btn._menu = menu
+    btn._rows = {}
+
+    local function reposition()
+        local scale = UIParent:GetEffectiveScale() or 1
+        local bScale = btn:GetEffectiveScale() or 1
+        local left, bottom = btn:GetLeft(), btn:GetBottom()
+        if not left or not bottom then return end
+        menu:ClearAllPoints()
+        menu:SetPoint("TOPLEFT", UIParent, "BOTTOMLEFT", left * bScale / scale, bottom * bScale / scale - 2)
+        menu:SetWidth(btn:GetWidth() * bScale / scale)
+    end
+
+    btn:SetScript("OnClick", function()
+        if menu:IsShown() then
+            menu:Hide()
+            arrow:SetText("v")
+        else
+            reposition()
+            menu:Show()
+            arrow:SetText("^")
+        end
+    end)
+    btn:SetScript("OnHide", function()
+        menu:Hide()
+        arrow:SetText("v")
+    end)
+
+    function btn:SetOptions(options, selectedIndex, onSelect)
+        options = options or {}
+        for _, row in ipairs(self._rows) do
+            row:Hide()
+        end
+        local rowH = Th.btnH or 24
+        menu:SetHeight(math.max(rowH, #options * rowH))
+        for index, option in ipairs(options) do
+            local row = self._rows[index]
+            if not row then
+                row = CreateFrame("Button", nil, menu)
+                row:SetHeight(rowH)
+                row:SetPoint("TOPLEFT", menu, "TOPLEFT", 0, -((index - 1) * rowH))
+                row:SetPoint("TOPRIGHT", menu, "TOPRIGHT", 0, -((index - 1) * rowH))
+                row.bg = Th.RoundedSurface(row, Th.c.panel, nil, 5, "BACKGROUND", -8)
+                row.text = Th.Fs(row, "data", "", "textSecond")
+                row.text:SetPoint("LEFT", 8, 0)
+                row.text:SetPoint("RIGHT", row, "RIGHT", -8, 0)
+                row.text:SetJustifyH("LEFT")
+                self._rows[index] = row
+            end
+            local rowOption = option
+            row.option = rowOption
+            row:Show()
+            row.text:SetText(string.format("%s (%s %d)", tostring(rowOption.name), rowOption.direction == "promote" and "up" or "down", tonumber(rowOption.jumps) or 1))
+            local c = rowOption.enabled and (tonumber(selectedIndex) == tonumber(rowOption.index) and Th.c.navActive or Th.c.panel) or Th.c.chrome
+            row.bg:SetColorTexture(c[1], c[2], c[3], c[4] or 1)
+            local tc = rowOption.enabled and Th.c.textSecond or Th.c.textDimmed
+            row.text:SetTextColor(tc[1], tc[2], tc[3], tc[4] or 1)
+            row:SetScript("OnClick", function()
+                if not rowOption.enabled then
+                    status(rowOption.reason or "Target rank is unavailable.", "textWarn")
+                    return
+                end
+                menu:Hide()
+                arrow:SetText("v")
+                if onSelect then onSelect(rowOption) end
+            end)
+        end
+    end
+
+    function btn:SetSelectedText(text)
+        label:SetText(text or "Choose target rank")
+    end
+
+    function btn:SetEnabled(enabled)
+        self._enabled = enabled == true
+        self:EnableMouse(self._enabled)
+        local c = self._enabled and Th.c.textPrimary or Th.c.textDimmed
+        label:SetTextColor(c[1], c[2], c[3], c[4] or 1)
+    end
+
+    return btn
+end
+
 function ECP:_setTab(tab)
     self.activeTab = tab
     for id, page in pairs(self.pages or {}) do
@@ -302,10 +411,8 @@ function ECP:_buildAltPage(page)
         local row = CreateFrame("Button", nil, self.addAltDropdown)
         row:SetSize(402, 26)
         row:SetPoint("TOPLEFT", self.addAltDropdown, "TOPLEFT", 4, -4 - ((i - 1) * 28))
-        row.bg = row:CreateTexture(nil, "BACKGROUND")
-        row.bg:SetAllPoints()
         local rc = T().c.panelAlt
-        row.bg:SetColorTexture(rc[1], rc[2], rc[3], rc[4] or 1)
+        row.bg = T().RoundedSurface(row, rc, nil, 5, "BACKGROUND", -8)
         row.text = T().Fs(row, "data", "", "textSecond")
         row.text:SetPoint("LEFT", row, "LEFT", 8, 0)
         row:SetScript("OnEnter", function(self)
@@ -374,15 +481,17 @@ end
 function ECP:_buildActionsPage(page)
     local y = -10
     y = makeSection(page, "RANK ACTIONS", y)
-    self.promoteBtn = GC.UI.Button.Create(page, "Promote", "success", 138, T().btnH)
-    self.promoteBtn:SetPoint("TOPLEFT", page, "TOPLEFT", 12, y)
-    self.promoteBtn:SetScript("OnClick", function() ECP:_confirmRankAction("promote") end)
-    self.demoteBtn = GC.UI.Button.Create(page, "Demote", "warning", 138, T().btnH)
-    self.demoteBtn:SetPoint("LEFT", self.promoteBtn, "RIGHT", 8, 0)
-    self.demoteBtn:SetScript("OnClick", function() ECP:_confirmRankAction("demote") end)
-    -- Target-rank dropdowns need safe multi-step macro validation first; the
-    -- operations service currently supports one protected rank jump at a time.
-    y = y - 50
+    makeLabel(page, "Target Rank", 12, y)
+    self.rankTargetDropdown = createRankDropdown(page, 260)
+    self.rankTargetDropdown:SetPoint("TOPLEFT", page, "TOPLEFT", 12, y - 16)
+    self.rankPrepareBtn = GC.UI.Button.Create(page, "Prepare Rank Change", "primary", 170, T().btnH)
+    self.rankPrepareBtn:SetPoint("LEFT", self.rankTargetDropdown, "RIGHT", 10, 0)
+    self.rankPrepareBtn:SetScript("OnClick", function() ECP:_confirmTargetRankAction() end)
+    self.rankActionHint = T().Fs(page, "tiny", "Select the final rank first. The hotkey will run only the prepared rank change.", "textDimmed")
+    self.rankActionHint:SetPoint("TOPLEFT", page, "TOPLEFT", 12, y - 44)
+    self.rankActionHint:SetPoint("RIGHT", page, "RIGHT", -12, 0)
+    self.rankActionHint:SetWordWrap(true)
+    y = y - 74
 
     y = makeSection(page, "DANGER ZONE", y)
     self.dangerHint = T().Fs(page, "tiny", "Danger actions prepare guild removal or moderation changes immediately after confirmation.", "textWarn")
@@ -433,8 +542,7 @@ function ECP:_refreshOfficerActionViews(live)
         demote = { enabled = false, reason = "Operations service is unavailable." },
         kick = { enabled = false, reason = "Operations service is unavailable." },
     }
-    setActionButtonState(self.promoteBtn, availability.promote, "Promotion is unavailable.")
-    setActionButtonState(self.demoteBtn, availability.demote, "Demotion is unavailable.")
+    self:_refreshRankTargetOptions(live, availability)
     setActionButtonState(self.kickBtn, availability.kick, "Guild removal is unavailable.")
 
     local canModerate = GC.Permissions and GC.Permissions.IsOfficerOrBetter and GC.Permissions:IsOfficerOrBetter()
@@ -442,6 +550,49 @@ function ECP:_refreshOfficerActionViews(live)
         enabled = canModerate and live ~= nil and GC.BanBook ~= nil,
         reason = not canModerate and "Officer permission required." or "Ban Book is unavailable.",
     }, "Ban Book is unavailable.")
+end
+
+function ECP:_refreshRankTargetOptions(live, availability)
+    local operations = GC.Services and GC.Services.Operations
+    local options = operations and operations.GetTargetRankOptions and operations:GetTargetRankOptions(live) or {}
+    self.rankTargetOptions = options
+
+    local selectedIndex = draft and draft.targetRankIndex or nil
+    local selectedOption
+    for _, option in ipairs(options or {}) do
+        if tonumber(option.index) == tonumber(selectedIndex) then
+            selectedOption = option
+            break
+        end
+    end
+    if selectedOption and selectedOption.enabled ~= true then
+        selectedOption = nil
+        if draft then draft.targetRankIndex = nil end
+    end
+
+    if self.rankTargetDropdown then
+        self.rankTargetDropdown:SetOptions(options, selectedOption and selectedOption.index or nil, function(option)
+            if draft then draft.targetRankIndex = option.index end
+            self.rankTargetDropdown:SetSelectedText(tostring(option.name))
+            self:_refreshOfficerActionViews(ensureLivePlayer())
+        end)
+        self.rankTargetDropdown:SetSelectedText(selectedOption and tostring(selectedOption.name) or "Choose target rank")
+        self.rankTargetDropdown:SetEnabled(live ~= nil and #options > 0)
+    end
+    if self.rankPrepareBtn then
+        self.rankPrepareBtn:SetEnabled(live ~= nil and selectedOption ~= nil)
+        if self.rankPrepareBtn.SetTooltip then
+            local reason = live and nil or "No character selected."
+            if live and not selectedOption then
+                reason = #options == 0 and "No eligible target ranks are available." or "Choose a target rank first."
+            end
+            self.rankPrepareBtn:SetTooltip(reason and "Rank action unavailable" or nil, reason)
+        end
+    end
+    if self.rankActionHint then
+        local current = live and live.rankName or "unknown"
+        self.rankActionHint:SetText("Current rank: " .. tostring(current) .. ". Select the final rank first; the hotkey will run only that prepared change.")
+    end
 end
 
 function ECP:_refreshAfterOfficerAction(options)
@@ -471,7 +622,7 @@ function ECP:_refreshAfterOfficerAction(options)
     self:_refreshHistory(ensureLivePlayer())
 end
 
-function ECP:_confirmRankAction(action)
+function ECP:_confirmTargetRankAction()
     local live = ensureLivePlayer()
     local operations = GC.Services and GC.Services.Operations
     if not live or not operations then
@@ -479,31 +630,36 @@ function ECP:_confirmRankAction(action)
         return
     end
 
-    local isPromote = action == "promote"
-    local verb = isPromote and "Promote" or "Demote"
-    local availability = operations:GetActionAvailability(live)
-    local allowed = availability and availability[action]
-    if not allowed or not allowed.enabled then
-        status((allowed and allowed.reason) or (verb .. " is unavailable."), "textDanger")
+    local targetRankIndex = draft and draft.targetRankIndex
+    local selected
+    for _, option in ipairs(self.rankTargetOptions or {}) do
+        if tonumber(option.index) == tonumber(targetRankIndex) then
+            selected = option
+            break
+        end
+    end
+    if not selected then
+        status("Choose a target rank first.", "textWarn")
         self:_refreshOfficerActionViews(live)
         return
     end
 
-    -- WoW's supported rank path is a protected one-step /gpromote or
-    -- /gdemote macro. A target-rank dropdown needs safe multi-step macro
-    -- validation before it can be offered here.
-    showConfirm("GUILDCORE_EDIT_CHARACTER_RANK_ACTION", verb .. " " .. tostring(live.key or live.name) .. "?", function()
-        local ok, message
-        if isPromote then
-            ok, message = operations:Promote(live)
-        else
-            ok, message = operations:Demote(live)
-        end
+    local verb = selected.direction == "promote" and "Promote" or "Demote"
+    local text = string.format(
+        "%s %s to %s? This prepares %d hotkey step%s.",
+        verb,
+        tostring(live.key or live.name),
+        tostring(selected.name),
+        tonumber(selected.jumps) or 1,
+        tonumber(selected.jumps) == 1 and "" or "s"
+    )
+    showConfirm("GUILDCORE_EDIT_CHARACTER_RANK_ACTION", text, function()
+        local ok, message = operations:PrepareRankChange(live, selected.index)
         if ok then
-            status(string.format("%s ready for %s. %s", verb, tostring(live.key or live.name), tostring(message or "Use the guild action hotkey to execute.")), "textWarn")
+            status(tostring(message or "Rank change prepared. Use the guild action hotkey to execute."), "textWarn")
             ECP:_refreshAfterOfficerAction()
         else
-            status(message or (verb .. " could not be prepared."), "textDanger")
+            status(message or "Rank change could not be prepared.", "textDanger")
             ECP:_refreshOfficerActionViews(live)
         end
     end)
@@ -978,10 +1134,8 @@ function ECP:_getLinkedAltRow(index)
     local row = CreateFrame("Button", nil, self.linkedAltContent)
     row:SetSize(246, 21)
     row:RegisterForClicks("LeftButtonUp", "RightButtonUp")
-    row.bg = row:CreateTexture(nil, "BACKGROUND")
-    row.bg:SetAllPoints()
     local c = T().c.panelAlt
-    row.bg:SetColorTexture(c[1], c[2], c[3], 0.25)
+    row.bg = T().RoundedSurface(row, {c[1], c[2], c[3], 0.25}, nil, 5, "BACKGROUND", -8)
     row.name = T().Fs(row, "data", "", "textSecond")
     row.name:SetPoint("LEFT", row, "LEFT", 8, 0)
     row.name:SetWidth(158)
@@ -1220,6 +1374,7 @@ function ECP:Open(player)
         points = "",
         pointsReason = "",
         pendingAction = nil,
+        targetRankIndex = nil,
         addAltKey = nil,
         addAltText = "",
         addAltKeys = {},
@@ -1358,14 +1513,19 @@ function ECP:Save()
     local function applyAll()
         local ok, err = self:_applySafeChanges(live)
         if not ok then status(err or "Unable to save character.", "textDanger"); return end
-        ok, err = self:_applyPendingAction(live)
-        if not ok then status(err or "Unable to apply pending action.", "textDanger"); return end
+        local actionResult
+        ok, actionResult = self:_applyPendingAction(live)
+        if not ok then status(actionResult or "Unable to apply pending action.", "textDanger"); return end
         if GS() then GS():TriggerScan() end
         if GC.UI.PlayerPanel then GC.UI.PlayerPanel:Refresh() end
         if GC.UI.RosterPanel then GC.UI.RosterPanel:Refresh() end
         if GC.UI.BanBookPanel and GC.UI.BanBookPanel.Refresh then GC.UI.BanBookPanel:Refresh() end
         if GC.UI.Dashboard and GC.UI.Dashboard.Refresh then GC.UI.Dashboard:Refresh() end
-        status("Character changes saved.", "textSuccess")
+        local message = type(actionResult) == "table"
+            and GC.Services.Alts
+            and GC.Services.Alts:DescribeLinkResult(actionResult, "Character changes saved.")
+            or "Character changes saved."
+        status(message, "textSuccess")
         self:Cancel()
     end
 

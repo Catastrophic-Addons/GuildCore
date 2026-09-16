@@ -106,37 +106,18 @@ function Settings:CreateCard(parent, y, title, description, height)
 end
 
 function Settings:CreateToggle(parent, y, def)
-    local Th = T()
     local card = self:CreateCard(parent, y, def.label, def.description, def.height or 70)
-    local switch = CreateFrame("Button", nil, card)
-    if GC.Perf then
-        GC.Perf:CountUI("buttons", 1)
-        GC.Perf:CountUI("textures", 2)
-    end
-    switch:SetSize(46, 22)
+    local switch = GC.UI.Panel.Toggle(card, 46, 22, function(value)
+        self:SetSetting(def.key, value, def.label)
+        if def.onChange then def.onChange(value) end
+    end)
     switch:SetPoint("RIGHT", card, "RIGHT", -16, 0)
-    local track = switch:CreateTexture(nil, "BACKGROUND")
-    track:SetAllPoints()
-    local knob = switch:CreateTexture(nil, "OVERLAY")
-    knob:SetSize(18, 18)
 
     local function draw()
         local value = self:GetSetting(def.key)
         if value == nil and def.default ~= nil then value = def.default end
-        local on = value and true or false
-        local c = on and Th.c.accent or Th.c.btnDisabled
-        track:SetColorTexture(c[1], c[2], c[3], on and 0.45 or 1)
-        knob:SetColorTexture(on and Th.c.accent[1] or 0.45, on and Th.c.accent[2] or 0.45, on and Th.c.accent[3] or 0.5, 1)
-        knob:ClearAllPoints()
-        knob:SetPoint(on and "RIGHT" or "LEFT", switch, on and "RIGHT" or "LEFT", on and -2 or 2, 0)
+        switch:SetChecked(value and true or false, true)
     end
-    switch:SetScript("OnClick", function()
-        local current = self:GetSetting(def.key)
-        if current == nil then current = def.default end
-        self:SetSetting(def.key, not current, def.label)
-        draw()
-        if def.onChange then def.onChange(not current) end
-    end)
     draw()
     card._refresh = draw
     return card, y - (def.height or 70) - 8
@@ -258,7 +239,7 @@ function Settings:Create(parent)
     local search = GC.UI.Panel.Input(frame, 260, Th.inputH)
     search:SetPoint("TOPRIGHT", frame, "TOPRIGHT", -P, -P)
     self.searchBox = search
-    local hint = Th.Fs(search, "small", "Search settings...", "textDimmed")
+    local hint = Th.Fs(search, "small", "Search preferences...", "textDimmed")
     hint:SetPoint("LEFT", search, "LEFT", 7, 0)
     search:SetScript("OnTextChanged", function(box)
         hint:SetShown((box:GetText() or "") == "")

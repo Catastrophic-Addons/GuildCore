@@ -88,12 +88,9 @@ local function knownBlizzardGuildFrames()
 end
 
 local function sendBlizzardGuildFramesBack()
-    for _, frame in ipairs(knownBlizzardGuildFrames()) do
-        if frame then
-            safeSetFrameStrata(frame, L.MAIN_STRATA)
-            safeSetFrameLevel(frame, L.MAIN_BASE_LEVEL)
-        end
-    end
+    -- Intentionally do not modify Blizzard frame strata/levels here. Changing
+    -- CommunitiesFrame/GuildFrame internals can reorder invisible overlays and
+    -- make the default guild UI eat clicks or draw foggy panels over chat.
 end
 
 function L:GetSafeFrameLevel(frame)
@@ -120,8 +117,6 @@ end
 
 function L:BringExternalFrameToFront(frame)
     if not frame then return end
-    safeSetFrameStrata(frame, self.MAIN_STRATA)
-    safeSetFrameLevel(frame, self.EXTERNAL_FRONT_LEVEL)
 
     local main = getMainFrame()
     if main then
@@ -152,30 +147,12 @@ function L:AttachExternalFocusHandlers(frame)
     safeHook(frame, "OnMouseDown", function(f)
         L:BringExternalFrameToFront(f)
     end, "_guildCoreExternalLayerMouseHooked")
-    safeHook(frame, "OnShow", function(f)
-        L:BringExternalFrameToFront(f)
-    end, "_guildCoreExternalLayerShowHooked")
-end
-
-function L:AttachExternalFocusTree(frame, depth)
-    if not frame or (depth or 0) > 3 then return end
-    self:AttachExternalFocusHandlers(frame)
-    if frame.GetChildren then
-        local ok, children = pcall(function()
-            return { frame:GetChildren() }
-        end)
-        if ok then
-            for _, child in ipairs(children) do
-                self:AttachExternalFocusTree(child, (depth or 0) + 1)
-            end
-        end
-    end
 end
 
 function L:AttachBlizzardFocusHandlers()
     local function attach()
         for _, frame in ipairs(knownBlizzardGuildFrames()) do
-            self:AttachExternalFocusTree(frame)
+            self:AttachExternalFocusHandlers(frame)
         end
     end
 

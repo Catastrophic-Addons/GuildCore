@@ -46,6 +46,45 @@ local function pendingClassificationCount()
     return count
 end
 
+local function getActionHotkey()
+    local macro = GC.Services and GC.Services.OperationsMacro
+    if macro and macro.GetHotkey then
+        return macro:GetHotkey()
+    end
+    local settings = GC.DB and GC.DB.GetSettings and GC.DB:GetSettings()
+    return settings and settings.guildActionHotkey or "CTRL-SHIFT-K"
+end
+
+local function getPreparedActionState()
+    local owner = GC.State and GC.State.actionMacroOwner or nil
+    local hotkey = getActionHotkey()
+    if owner == "operations" then
+        local macro = GC.Services and GC.Services.OperationsMacro
+        if macro and macro.HasPreparedMacro and macro:HasPreparedMacro() then
+            local lines = macro.preparedLines or {}
+            local names = macro.GetQueuedNames and macro:GetQueuedNames() or {}
+            local target = names[1] or "rank action"
+            return {
+                owner = "operations",
+                text = string.format("Prepared: %s rank change (%s)", tostring(target), hotkey),
+                tooltip = string.format("The guild action hotkey is armed with %d rank step%s.", #lines, #lines == 1 and "" or "s"),
+            }
+        end
+    elseif owner == "purge" then
+        local purge = GC.Services and GC.Services.Purge
+        if purge and purge.HasPreparedMacro and purge:HasPreparedMacro() then
+            local state = purge.GetState and purge:GetState() or nil
+            local names = state and state.meta and state.meta.preparedNames or {}
+            return {
+                owner = "purge",
+                text = string.format("Prepared: %d purge action%s (%s)", #names, #names == 1 and "" or "s", hotkey),
+                tooltip = "The guild action hotkey is armed with queued purge removals.",
+            }
+        end
+    end
+    return nil
+end
+
 -- panels keyed by id; each has {frame, hasDetail, refresh}
 local panels      = {}
 local navButtons  = {}
@@ -60,6 +99,26 @@ local function saveUIState()
     if MF.frame and MF.frame:IsShown() then
         ui.windowX = MF.frame:GetLeft()
         ui.windowY = MF.frame:GetTop()
+        ui.windowWidth = MF.frame:GetWidth()
+        ui.windowHeight = MF.frame:GetHeight()
+    end
+end
+
+function MF:ApplyScale()
+    if not self.frame then return end
+    local settings = GC.DB and GC.DB.GetSettings and GC.DB:GetSettings() or {}
+    local requested = math.max(0.75, math.min(1.25, tonumber(settings.uiScale) or 1))
+    local screenW = UIParent and UIParent:GetWidth() or 1400
+    local screenH = UIParent and UIParent:GetHeight() or 865
+    local scale = math.max(0.65, math.min(requested, (screenW - 48) / self.frame:GetWidth(), (screenH - 48) / self.frame:GetHeight()))
+    self.frame:SetScale(scale)
+    if self.miniFrame then self.miniFrame:SetScale(scale) end
+    local maxW = math.max(1120, math.floor((screenW / scale) - 48))
+    local maxH = math.max(680, math.floor((screenH / scale) - 48))
+    if self.frame.SetResizeBounds then
+        self.frame:SetResizeBounds(1120, 680, maxW, maxH)
+    elseif self.frame.SetMaxResize then
+        self.frame:SetMaxResize(maxW, maxH)
     end
 end
 
@@ -119,6 +178,9 @@ local function showPanel(id, skipRefresh)
     if not skipRefresh and MF.RefreshPrompt then
         MF:RefreshPrompt()
     end
+    if MF.RefreshPreparedActionStatus then
+        MF:RefreshPreparedActionStatus()
+    end
 end
 
 -- ──────────────────────────────────────────────
@@ -136,6 +198,28 @@ function MF:SetStatus(msg, colorKey)
     statusTimer = C_Timer.NewTimer(4, function()
         if MF.statusLabel then MF.statusLabel:SetText("") end
     end)
+    self:RefreshPreparedActionStatus()
+end
+
+function MF:RefreshPreparedActionStatus()
+    if not self.preparedActionLabel then return end
+    local state = getPreparedActionState()
+    if not state then
+        self.preparedActionLabel:Hide()
+        if self.preparedActionClearBtn then self.preparedActionClearBtn:Hide() end
+        if self.footerLabel then self.footerLabel:Show() end
+        return
+    end
+
+    self.preparedActionLabel:SetText(state.text)
+    self.preparedActionLabel._tooltipTitle = "Guild Action Prepared"
+    self.preparedActionLabel._tooltipBody = state.tooltip .. " Clear it if you do not want the next hotkey press to run it."
+    self.preparedActionLabel:Show()
+    if self.footerLabel then self.footerLabel:Hide() end
+    if self.preparedActionClearBtn then
+        self.preparedActionClearBtn._owner = state.owner
+        self.preparedActionClearBtn:Show()
+    end
 end
 
 -- Switch to a named panel programmatically.
@@ -151,6 +235,7 @@ function MF:RefreshActive()
         panels[activePanel].refresh()
     end
     self:RefreshPrompt()
+    self:RefreshPreparedActionStatus()
 end
 
 function MF:ApplyTheme()
@@ -161,6 +246,7 @@ function MF:ApplyTheme()
     if activePanel then
         showPanel(activePanel, true)
     end
+    self:ApplyScale()
     self:RefreshActive()
 end
 
@@ -219,7 +305,10 @@ function MF:UpdateMiniFrame()
         self.miniGuildLabel:SetText(guildDisplayName())
     end
     if self.miniCountLabel then
-        local total, online = GetNumGuildMembers()
+        local total, online = 0, 0
+        if GC.API and GC.API.GetNumGuildMembers then
+            total, online = GC.API.GetNumGuildMembers()
+        end
         total = total or 0
         online = online or 0
         self.miniCountLabel:SetText(online .. " / " .. total)
@@ -233,6 +322,7 @@ function MF:CreateMiniFrame()
 
     local mini = CreateFrame("Frame", "GuildCoreMiniFrame", UIParent)
     mini:SetSize(236, 54)
+    if self.frame and self.frame.GetScale then mini:SetScale(self.frame:GetScale() or 1) end
     mini:SetMovable(true)
     mini:EnableMouse(true)
     mini:RegisterForDrag("LeftButton")
@@ -266,51 +356,27 @@ function MF:CreateMiniFrame()
 
     local accent = mini:CreateTexture(nil, "ARTWORK")
     accent:SetPoint("TOPLEFT"); accent:SetPoint("BOTTOMLEFT")
-    accent:SetWidth(3)
+    accent:SetWidth(2)
     local ac = Th.c.accent
-    accent:SetColorTexture(ac[1], ac[2], ac[3], 1)
+    accent:SetColorTexture(ac[1], ac[2], ac[3], 0.64)
 
-    local title = Th.Fs(mini, "subheader", GC.Name or "Guild Core", "textAccent")
-    title:SetPoint("TOPLEFT", 12, -7)
-
-    local guild = Th.Fs(mini, "data", "", "textDimmed")
-    guild:SetPoint("TOPLEFT", 12, -28)
-    guild:SetPoint("RIGHT", mini, "RIGHT", -78, 0)
+    local guild = Th.Fs(mini, "header", "", "textAccent")
+    guild:SetPoint("TOPLEFT", 12, -6)
+    guild:SetPoint("TOPRIGHT", mini, "TOPRIGHT", -78, -6)
     guild:SetJustifyH("LEFT")
+    guild:SetWordWrap(false)
     self.miniGuildLabel = guild
+
+    local title = Th.Fs(mini, "tiny", GC.Name or "Guild Core", "textDimmed")
+    title:SetPoint("TOPLEFT", 12, -31)
 
     local count = Th.Fs(mini, "data", "", "textSecond")
     count:SetPoint("RIGHT", mini, "RIGHT", -44, -10)
     self.miniCountLabel = count
 
-    local restoreBtn = CreateFrame("Button", nil, mini)
-    restoreBtn:SetSize(30, 30)
+    local restoreBtn = GC.UI.Button.Create(mini, "+", "secondary", 30, 30)
     restoreBtn:SetPoint("RIGHT", mini, "RIGHT", -8, 0)
-    local restoreBg = restoreBtn:CreateTexture(nil, "BACKGROUND")
-    restoreBg:SetAllPoints()
-    restoreBg:SetColorTexture(0.120, 0.120, 0.162, 1)
-    local restoreFs = restoreBtn:CreateFontString(nil, "OVERLAY")
-    Th.ApplyFont(restoreFs, "subheader")
-    if Th.RegisterRefresh then
-        Th:RegisterRefresh(function()
-            T().ApplyFont(restoreFs, "subheader")
-        end)
-    end
-    restoreFs:SetAllPoints()
-    restoreFs:SetJustifyH("CENTER")
-    restoreFs:SetJustifyV("MIDDLE")
-    restoreFs:SetText("+")
-    restoreFs:SetTextColor(1, 1, 1, 1)
-    restoreBtn:SetScript("OnEnter", function()
-        restoreBg:SetColorTexture(0.185, 0.185, 0.245, 1)
-        GameTooltip:SetOwner(restoreBtn, "ANCHOR_RIGHT")
-        GameTooltip:SetText("Restore Guild Core", 1, 1, 1, 1, true)
-        GameTooltip:Show()
-    end)
-    restoreBtn:SetScript("OnLeave", function()
-        restoreBg:SetColorTexture(0.120, 0.120, 0.162, 1)
-        GameTooltip:Hide()
-    end)
+    restoreBtn:SetTooltip("Restore Guild Core")
     restoreBtn:SetScript("OnClick", function()
         MF:Restore()
     end)
@@ -350,8 +416,28 @@ function MF:Create()
 
     -- ── Window ──────────────────────────────────
     local frame = CreateFrame("Frame", "GuildCoreMainFrame", UIParent)
-    frame:SetSize(1400, 865)
+    local uiState = GC.DB:GetUIState()
+    local screenW = UIParent and UIParent:GetWidth() or 1400
+    local screenH = UIParent and UIParent:GetHeight() or 865
+    local settings = GC.DB and GC.DB.GetSettings and GC.DB:GetSettings() or {}
+    local requestedScale = math.max(0.75, math.min(1.25, tonumber(settings.uiScale) or 1))
+    local uiScale = math.max(0.65, math.min(requestedScale, (screenW - 48) / 1120, (screenH - 48) / 680))
+    local maxW = math.max(1120, math.floor((screenW / uiScale) - 48))
+    local maxH = math.max(680, math.floor((screenH / uiScale) - 48))
+    local minW = 1120
+    local minH = 680
+    local initialW = math.max(minW, math.min(maxW, tonumber(uiState.windowWidth) or 1280))
+    local initialH = math.max(minH, math.min(maxH, tonumber(uiState.windowHeight) or 780))
+    frame:SetSize(initialW, initialH)
+    frame:SetScale(uiScale)
     frame:SetMovable(true)
+    if frame.SetResizable then frame:SetResizable(true) end
+    if frame.SetResizeBounds then
+        frame:SetResizeBounds(minW, minH, maxW, maxH)
+    else
+        if frame.SetMinResize then frame:SetMinResize(minW, minH) end
+        if frame.SetMaxResize then frame:SetMaxResize(maxW, maxH) end
+    end
     frame:EnableMouse(true)
     frame:RegisterForDrag("LeftButton")
     if GC.UI.FrameLayering then
@@ -377,7 +463,6 @@ function MF:Create()
     end
 
     -- Restore saved position or center
-    local uiState = GC.DB:GetUIState()
     if uiState.windowX and uiState.windowY then
         frame:SetPoint("TOPLEFT", UIParent, "BOTTOMLEFT", uiState.windowX, uiState.windowY)
     else
@@ -389,6 +474,49 @@ function MF:Create()
         f:StopMovingOrSizing()
         saveUIState()
     end)
+    frame:SetScript("OnSizeChanged", function()
+        if MF._resizeRefreshPending or not frame:IsShown() then return end
+        MF._resizeRefreshPending = true
+        if C_Timer and C_Timer.After then
+            C_Timer.After(0.08, function()
+                MF._resizeRefreshPending = false
+                saveUIState()
+                MF:RefreshActive()
+            end)
+        else
+            MF._resizeRefreshPending = false
+        end
+    end)
+
+    local resizeGrip = CreateFrame("Button", nil, frame)
+    resizeGrip:SetSize(22, 22)
+    resizeGrip:SetPoint("BOTTOMRIGHT", frame, "BOTTOMRIGHT", -3, 3)
+    resizeGrip:SetFrameLevel((frame:GetFrameLevel() or 80) + 10)
+    local gripColor = Th.c.textDimmed
+    for offset = 0, 2 do
+        local mark = resizeGrip:CreateTexture(nil, "OVERLAY")
+        mark:SetSize(2 + (offset * 4), 2)
+        mark:SetPoint("BOTTOMRIGHT", resizeGrip, "BOTTOMRIGHT", -3, 4 + (offset * 4))
+        mark:SetColorTexture(gripColor[1], gripColor[2], gripColor[3], 0.7)
+    end
+    resizeGrip:SetScript("OnMouseDown", function(_, button)
+        if button == "LeftButton" and frame.StartSizing then frame:StartSizing("BOTTOMRIGHT") end
+    end)
+    resizeGrip:SetScript("OnMouseUp", function()
+        if frame.StopMovingOrSizing then frame:StopMovingOrSizing() end
+        saveUIState()
+    end)
+    resizeGrip:SetScript("OnEnter", function(self)
+        if GameTooltip then
+            GameTooltip:SetOwner(self, "ANCHOR_TOPLEFT")
+            GameTooltip:SetText("Resize Guild Core", 1, 1, 1)
+            GameTooltip:Show()
+        end
+    end)
+    resizeGrip:SetScript("OnLeave", function()
+        if GameTooltip then GameTooltip:Hide() end
+    end)
+    self.resizeGrip = resizeGrip
 
     -- Background + accent border
     Th.Bg(frame, Th.c.bg, Th.c.borderAccent)
@@ -404,7 +532,7 @@ function MF:Create()
         shadow:SetFrameLevel(math.max(1, (frame:GetFrameLevel() or 80) - 1))
     end
     shadow:Hide()
-    Th.Bg(shadow, {0, 0, 0, 0.60})
+    Th.Bg(shadow, {0, 0, 0, 0.42})
     self.shadowFrame = shadow
 
     frame:SetScript("OnShow", function()
@@ -431,72 +559,38 @@ function MF:Create()
     local titleBar = CreateFrame("Frame", nil, frame)
     titleBar:SetPoint("TOPLEFT"); titleBar:SetPoint("TOPRIGHT")
     titleBar:SetHeight(Th.titleBarH)
-    Th.Bg(titleBar, Th.c.chrome)
+    Th.Bg(titleBar, Th.c.chrome, nil, {rounded = true})
 
     local titleEdge = titleBar:CreateTexture(nil, "ARTWORK")
     titleEdge:SetPoint("BOTTOMLEFT"); titleEdge:SetPoint("BOTTOMRIGHT"); titleEdge:SetHeight(1)
     local ac = Th.c.accent
-    titleEdge:SetColorTexture(ac[1], ac[2], ac[3], 0.45)
+    titleEdge:SetColorTexture(ac[1], ac[2], ac[3], 0.26)
 
-    local titleFs = Th.Fs(titleBar, "header", GC.Name or "Guild Core", "textAccent")
-    titleFs:SetPoint("LEFT", 16, 5)
+    local guildFs = Th.Fs(titleBar, "header", guildDisplayName(), "textAccent")
+    guildFs:SetPoint("LEFT", 16, 5)
+    guildFs:SetPoint("RIGHT", titleBar, "RIGHT", -220, 5)
+    guildFs:SetJustifyH("LEFT")
+    guildFs:SetWordWrap(false)
+    self.guildLabel = guildFs
 
-    local subFs = Th.Fs(titleBar, "subheader", guildDisplayName(), "textDimmed")
-    subFs:SetPoint("LEFT", 16, -14)
-    self.guildLabel = subFs
+    local titleFs = Th.Fs(titleBar, "tiny", GC.Name or "Guild Core", "textDimmed")
+    titleFs:SetPoint("LEFT", 16, -17)
 
     local verFs = Th.Fs(titleBar, "data", "v" .. (GC.Version or "0"), "textDimmed")
     verFs:SetPoint("RIGHT", -100, 0)
 
     -- Minimize button
-    local minBtn = CreateFrame("Button", nil, frame)
-    minBtn:SetSize(30, 30)
+    local minBtn = GC.UI.Button.Create(frame, "-", "secondary", 30, 30)
     minBtn:SetPoint("TOPRIGHT", -45, -9)
-    local minBg = minBtn:CreateTexture(nil, "BACKGROUND")
-    minBg:SetAllPoints()
-    minBg:SetColorTexture(0.120, 0.120, 0.162, 1)
-    local minFs = minBtn:CreateFontString(nil, "OVERLAY")
-    Th.ApplyFont(minFs, "subheader")
-    if Th.RegisterRefresh then
-        Th:RegisterRefresh(function()
-            T().ApplyFont(minFs, "subheader")
-        end)
-    end
-    minFs:SetAllPoints(); minFs:SetJustifyH("CENTER"); minFs:SetJustifyV("MIDDLE")
-    minFs:SetText("-"); minFs:SetTextColor(1, 1, 1, 1)
-    minBtn:SetScript("OnEnter", function()
-        minBg:SetColorTexture(0.185, 0.185, 0.245, 1)
-        GameTooltip:SetOwner(minBtn, "ANCHOR_RIGHT")
-        GameTooltip:SetText("Minimize Guild Core", 1, 1, 1, 1, true)
-        GameTooltip:AddLine("Collapse into a small draggable frame.", 0.8, 0.8, 0.8, true)
-        GameTooltip:Show()
-    end)
-    minBtn:SetScript("OnLeave", function()
-        minBg:SetColorTexture(0.120, 0.120, 0.162, 1)
-        GameTooltip:Hide()
-    end)
+    minBtn:SetTooltip("Minimize Guild Core", "Collapse into a small draggable frame.")
     minBtn:SetScript("OnClick", function()
         MF:Minimize()
     end)
 
     -- Close button
-    local closeBtn = CreateFrame("Button", nil, frame)
-    closeBtn:SetSize(30, 30)
+    local closeBtn = GC.UI.Button.Create(frame, "X", "danger", 30, 30)
     closeBtn:SetPoint("TOPRIGHT", -9, -9)
-    local closeBg = closeBtn:CreateTexture(nil, "BACKGROUND")
-    closeBg:SetAllPoints()
-    closeBg:SetColorTexture(0.40, 0.07, 0.07, 0.90)
-    local closeFs = closeBtn:CreateFontString(nil, "OVERLAY")
-    Th.ApplyFont(closeFs, "subheader")
-    if Th.RegisterRefresh then
-        Th:RegisterRefresh(function()
-            T().ApplyFont(closeFs, "subheader")
-        end)
-    end
-    closeFs:SetAllPoints(); closeFs:SetJustifyH("CENTER"); closeFs:SetJustifyV("MIDDLE")
-    closeFs:SetText("X"); closeFs:SetTextColor(1, 0.55, 0.55, 1)
-    closeBtn:SetScript("OnEnter", function() closeBg:SetColorTexture(0.72, 0.12, 0.12, 1) end)
-    closeBtn:SetScript("OnLeave", function() closeBg:SetColorTexture(0.40, 0.07, 0.07, 0.90) end)
+    closeBtn:SetTooltip("Close Guild Core")
     closeBtn:SetScript("OnClick", function() GC.UI:Hide() end)
 
     -- ── Status bar ──────────────────────────────
@@ -517,7 +611,33 @@ function MF:Create()
 
     local footerFs = Th.Fs(statusBar, "data", "\194\169 2026 AddOns by Catastrophie", "textDimmed")
     footerFs:SetPoint("CENTER", statusBar, "CENTER", 0, 0)
-    footerFs:SetTextColor(1, 0.55, 0.1, 1)
+    self.footerLabel = footerFs
+
+    local preparedFs = Th.Fs(statusBar, "data", "", "textWarn")
+    preparedFs:SetPoint("CENTER", statusBar, "CENTER", -34, 0)
+    preparedFs:SetJustifyH("CENTER")
+    preparedFs:Hide()
+    self.preparedActionLabel = preparedFs
+
+    local preparedClearBtn = GC.UI.Button.Create(statusBar, "Clear", "secondary", 54, Th.btnH - 4)
+    preparedClearBtn:SetPoint("LEFT", preparedFs, "RIGHT", 8, 0)
+    preparedClearBtn:SetTooltip("Clear Prepared Action", "Disarm the current guild action macro and empty its prepared queue.")
+    preparedClearBtn:SetScript("OnClick", function()
+        local owner = preparedClearBtn._owner or (GC.State and GC.State.actionMacroOwner)
+        if owner == "operations" and GC.Services and GC.Services.OperationsMacro then
+            GC.Services.OperationsMacro:ClearQueue()
+            MF:SetStatus("Prepared rank action cleared.", "textWarn")
+        elseif owner == "purge" and GC.Services and GC.Services.Purge then
+            GC.Services.Purge:ClearQueue()
+            MF:SetStatus("Prepared purge action cleared.", "textWarn")
+            if GC.UI.PurgePanel and GC.UI.PurgePanel.Refresh then GC.UI.PurgePanel:Refresh() end
+        else
+            MF:SetStatus("No prepared guild action to clear.", "textDimmed")
+        end
+        MF:RefreshPreparedActionStatus()
+    end)
+    preparedClearBtn:Hide()
+    self.preparedActionClearBtn = preparedClearBtn
 
     -- ── Nav sidebar ─────────────────────────────
     local sidebar = CreateFrame("Frame", nil, frame)
@@ -534,30 +654,32 @@ function MF:Create()
     local navItems = {
         {id = "dashboard",  label = "Dashboard"},
         {id = "roster",     label = "Roster"},
-        {id = "purge",      label = "Purge"},
-        {id = "invite",     label = "Invite"},
+        {id = "invite",     label = "Invite", gapBefore = true},
+        {id = "messaging",  label = "Messages"},
+        {id = "purge",      label = "Purge", gapBefore = true},
         {id = "banbook",    label = "Ban Book"},
         {id = "log",        label = "Activity"},
-        {id = "messaging",  label = "Messages"},
-        {id = "settings",   label = "Settings"},
+        {id = "settings",   label = "Settings", gapBefore = true},
         {id = "help",       label = "Help"},
     }
 
     local navItemH = 42
+    local navY = 0
     for i, item in ipairs(navItems) do
+        if item.gapBefore then navY = navY + 10 end
         local btn = CreateFrame("Button", nil, sidebar)
         btn:SetHeight(navItemH)
-        btn:SetPoint("TOPLEFT",  sidebar, "TOPLEFT",  0, -(i-1)*navItemH)
-        btn:SetPoint("TOPRIGHT", sidebar, "TOPRIGHT", 0, -(i-1)*navItemH)
+        btn:SetPoint("TOPLEFT",  sidebar, "TOPLEFT",  0, -navY)
+        btn:SetPoint("TOPRIGHT", sidebar, "TOPRIGHT", 0, -navY)
+        navY = navY + navItemH
 
         local nc = Th.c.navBg
-        local bg = btn:CreateTexture(nil, "BACKGROUND", nil, -8)
-        bg:SetAllPoints(); bg:SetColorTexture(nc[1], nc[2], nc[3], nc[4])
+        local bg = Th.RoundedSurface(btn, nc, nil, 6, "BACKGROUND", -8)
         btn._bg = bg
 
         local accentBar = btn:CreateTexture(nil, "ARTWORK")
-        accentBar:SetWidth(3); accentBar:SetPoint("TOPLEFT"); accentBar:SetPoint("BOTTOMLEFT")
-        accentBar:SetColorTexture(ac[1], ac[2], ac[3], 1); accentBar:SetAlpha(0)
+        accentBar:SetWidth(2); accentBar:SetPoint("TOPLEFT"); accentBar:SetPoint("BOTTOMLEFT")
+        accentBar:SetColorTexture(ac[1], ac[2], ac[3], 0.72); accentBar:SetAlpha(0)
         btn._accent = accentBar
 
         local lbl = Th.Fs(btn, "nav", item.label, "textSecond")
@@ -663,8 +785,11 @@ function MF:Create()
             self:SetStatus("Enter a known main character name or key.", "textDanger")
             return
         end
-        local ok, err = GC.Services.Alts:SetAlt(self.promptTargetKey, mainKey, "prompt")
-        self:SetStatus(ok and "Alt link saved." or err, ok and "textSuccess" or "textDanger")
+        local ok, result = GC.Services.Alts:SetAlt(self.promptTargetKey, mainKey, "prompt")
+        local message = ok
+            and GC.Services.Alts:DescribeLinkResult(result, "Alt link saved.")
+            or result
+        self:SetStatus(message, ok and "textSuccess" or "textDanger")
         self:RefreshActive()
     end)
 
@@ -728,12 +853,16 @@ function MF:Create()
     local startPanel = (uiState.lastPanel and panels[uiState.lastPanel]) and uiState.lastPanel or "dashboard"
     showPanel(startPanel, true)
     self:RefreshPrompt()
+    self:RefreshPreparedActionStatus()
 end
 
 -- Update the member count label in the status bar.
 function MF:UpdateMemberCount()
     if not self.memberCountLabel then return end
-    local total, online = GetNumGuildMembers()
+    local total, online = 0, 0
+    if GC.API and GC.API.GetNumGuildMembers then
+        total, online = GC.API.GetNumGuildMembers()
+    end
     total  = total  or 0
     online = online or 0
     self.memberCountLabel:SetText(online .. " / " .. total .. " online")

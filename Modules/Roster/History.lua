@@ -207,6 +207,14 @@ function GC.Modules.RosterHistory:ApplyChanges(snapshot, changes, reason)
     if not players then return end
 
     local currentKeys = buildSnapshotMemberKeys(snapshot)
+    local departedKeys = {}
+    local departedSeen = {}
+    local function markDeparted(key)
+        if key and not departedSeen[key] then
+            departedSeen[key] = true
+            departedKeys[#departedKeys + 1] = key
+        end
+    end
 
     -- Update every guild member present in the snapshot, including officers
     -- and other ranks outside the tracked intelligence scope.
@@ -235,7 +243,10 @@ function GC.Modules.RosterHistory:ApplyChanges(snapshot, changes, reason)
         elseif change.type == "PROMOTED" or change.type == "DEMOTED" then
             if record then record.promotedAt = snapshot.takenAt end
         elseif change.type == "LEFT" then
-            if record then record.status = "left" end
+            if record then
+                record.status = "left"
+                markDeparted(change.playerKey)
+            end
         elseif change.type == "UNTRACKED" then
             local member = snapshot.excluded and snapshot.excluded[change.playerKey]
             if record and member then
@@ -255,6 +266,36 @@ function GC.Modules.RosterHistory:ApplyChanges(snapshot, changes, reason)
         if record.status == "active" and not currentKeys[key] then
             record.status = "left"
             record.lastScanReason = reason
+            markDeparted(key)
+        end
+    end
+
+    -- Upgrade cleanup: include stale links created before automatic departure
+    -- handling existed, even when the character was already marked as left.
+    for key, record in pairs(players) do
+        if record and record.status ~= "active" and (record.main or #(record.alts or {}) > 0) then
+            markDeparted(key)
+        end
+        if record then
+            for _, altKey in ipairs(record.alts or {}) do
+                local altRecord = players[altKey]
+                if altRecord and altRecord.status ~= "active" then
+                    markDeparted(altKey)
+                end
+            end
+            local mainRecord = record.main and players[record.main]
+            if mainRecord and mainRecord.status ~= "active" then
+                markDeparted(record.main)
+            end
+        end
+    end
+
+    -- All departures are marked before relationships are changed so an alt
+    -- leaving in the same scan can never be promoted to Main.
+    local altService = GC.Services and GC.Services.Alts
+    if altService and altService.HandleCharacterRemoved then
+        for _, key in ipairs(departedKeys) do
+            altService:HandleCharacterRemoved(key, "roster-left")
         end
     end
 

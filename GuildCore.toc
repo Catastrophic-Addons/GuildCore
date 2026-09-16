@@ -1,8 +1,8 @@
-## Interface: 120005
+## Interface: 120007, 120100, 120105
 ## Title: Guild Core
 ## Notes: Modern guild management suite for World of Warcraft (Retail).
 ## Author: Catastrophie
-## Version: 1.5.29b
+## Version: 1.8.22
 ## SavedVariables: GuildCoreDB
 ## IconTexture: Interface/AddOns/GuildCore/Assets/icons/GC_Gold
 

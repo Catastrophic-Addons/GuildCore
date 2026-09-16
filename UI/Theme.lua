@@ -16,63 +16,77 @@ T.detailWidth  = 280
 T.titleBarH    = 48
 T.statusBarH   = 28
 T.colBarH      = 28
-T.padding      = 12
+T.padding      = 14
 T.rowH         = 32
 T.btnH         = 30
 T.inputH       = 28
-T.sectionGap   = 10
+T.sectionGap   = 12
+T.cornerRadius  = 8
 
 -- Color palette (arrays: {r, g, b, a})
 T.c = {
     -- Window / chrome
-    bg            = {0.060, 0.060, 0.080, 0.97},
-    chrome        = {0.040, 0.040, 0.055, 1.00},
-    panel         = {0.090, 0.090, 0.115, 1.00},
-    panelAlt      = {0.068, 0.068, 0.092, 1.00},
-    panelHover    = {0.130, 0.135, 0.180, 1.00},
-    border        = {0.200, 0.200, 0.260, 1.00},
-    borderStrong  = {0.260, 0.260, 0.340, 1.00},
-    borderAccent  = {0.310, 0.820, 0.780, 0.65},
-    separator     = {0.150, 0.150, 0.200, 1.00},
+    bg            = {0.046, 0.049, 0.061, 0.97},
+    chrome        = {0.038, 0.041, 0.052, 1.00},
+    panel         = {0.074, 0.079, 0.098, 1.00},
+    panelAlt      = {0.088, 0.094, 0.116, 1.00},
+    panelHover    = {0.112, 0.126, 0.154, 1.00},
+    border        = {0.135, 0.145, 0.180, 0.82},
+    borderStrong  = {0.185, 0.200, 0.245, 0.88},
+    borderAccent  = {0.310, 0.720, 0.660, 0.34},
+    separator     = {0.110, 0.120, 0.150, 0.78},
     -- Accent
-    accent        = {0.310, 0.820, 0.780, 1.00},
-    accentDim     = {0.310, 0.820, 0.780, 0.08},
-    accentMid     = {0.310, 0.820, 0.780, 0.25},
+    accent        = {0.310, 0.720, 0.660, 1.00},
+    accentDim     = {0.310, 0.720, 0.660, 0.045},
+    accentMid     = {0.310, 0.720, 0.660, 0.145},
     -- Text
     textPrimary   = {1.000, 1.000, 1.000, 1.00},
-    textSecond    = {0.720, 0.720, 0.780, 1.00},
-    textDimmed    = {0.450, 0.450, 0.520, 1.00},
-    textAccent    = {0.310, 0.820, 0.780, 1.00},
-    textWarn      = {0.940, 0.750, 0.100, 1.00},
-    textDanger    = {0.920, 0.300, 0.260, 1.00},
-    textSuccess   = {0.220, 0.820, 0.460, 1.00},
+    textSecond    = {0.740, 0.755, 0.805, 1.00},
+    textDimmed    = {0.500, 0.515, 0.575, 1.00},
+    textAccent    = {0.430, 0.820, 0.760, 1.00},
+    textWarn      = {0.860, 0.650, 0.180, 1.00},
+    textDanger    = {0.900, 0.340, 0.340, 1.00},
+    textSuccess   = {0.300, 0.780, 0.480, 1.00},
     -- Buttons
-    btnPrimary    = {0.130, 0.400, 0.570, 1.00},
-    btnPrimHov    = {0.180, 0.540, 0.740, 1.00},
-    btnSecond     = {0.120, 0.120, 0.162, 1.00},
-    btnSecHov     = {0.185, 0.185, 0.245, 1.00},
-    btnDanger     = {0.520, 0.090, 0.090, 1.00},
-    btnDanHov     = {0.700, 0.130, 0.130, 1.00},
-    btnSuccess    = {0.090, 0.350, 0.180, 1.00},
-    btnSucHov     = {0.130, 0.470, 0.240, 1.00},
-    btnDisabled   = {0.075, 0.075, 0.098, 1.00},
+    btnPrimary    = {0.115, 0.420, 0.500, 1.00},
+    btnPrimHov    = {0.155, 0.520, 0.610, 1.00},
+    btnSecond     = {0.100, 0.108, 0.134, 1.00},
+    btnSecHov     = {0.140, 0.154, 0.190, 1.00},
+    btnDanger     = {0.500, 0.120, 0.120, 1.00},
+    btnDanHov     = {0.650, 0.175, 0.175, 1.00},
+    btnSuccess    = {0.110, 0.360, 0.220, 1.00},
+    btnSucHov     = {0.160, 0.470, 0.300, 1.00},
+    btnDisabled   = {0.068, 0.072, 0.088, 1.00},
     -- Nav sidebar
-    navBg         = {0.065, 0.065, 0.088, 1.00},
-    navActive     = {0.120, 0.120, 0.165, 1.00},
-    navHover      = {0.095, 0.095, 0.132, 1.00},
+    navBg         = {0.055, 0.060, 0.076, 1.00},
+    navActive     = {0.092, 0.108, 0.136, 1.00},
+    navHover      = {0.078, 0.088, 0.112, 1.00},
     -- Status / indicators
     statusActive  = {0.220, 0.800, 0.440, 1.00},
     statusInact   = {0.800, 0.260, 0.200, 1.00},
     statusWarn    = {0.920, 0.720, 0.100, 1.00},
     -- Roster rows
-    rowOdd        = {0.068, 0.068, 0.092, 1.00},
-    rowEven       = {0.090, 0.090, 0.115, 1.00},
-    rowHover      = {0.135, 0.170, 0.220, 1.00},
-    rowSelected   = {0.110, 0.240, 0.310, 1.00},
+    rowOdd        = {0.070, 0.074, 0.092, 1.00},
+    rowEven       = {0.086, 0.091, 0.112, 1.00},
+    rowHover      = {0.120, 0.145, 0.180, 1.00},
+    rowSelected   = {0.095, 0.190, 0.230, 1.00},
 }
 
 local ADDON_FONT_PATH = "Interface\\AddOns\\GuildCore\\Assets\\fonts\\"
+local ADDON_UI_PATH = "Interface\\AddOns\\GuildCore\\Assets\\ui\\"
 local FALLBACK_FONT = "Fonts\\ARIALN.TTF"
+local ROUNDED_CORNERS = {
+    tl = ADDON_UI_PATH .. "rounded-tl.tga",
+    tr = ADDON_UI_PATH .. "rounded-tr.tga",
+    bl = ADDON_UI_PATH .. "rounded-bl.tga",
+    br = ADDON_UI_PATH .. "rounded-br.tga",
+}
+local ROUNDED_BORDER_CORNERS = {
+    tl = ADDON_UI_PATH .. "rounded-border-tl.tga",
+    tr = ADDON_UI_PATH .. "rounded-border-tr.tga",
+    bl = ADDON_UI_PATH .. "rounded-border-bl.tga",
+    br = ADDON_UI_PATH .. "rounded-border-br.tga",
+}
 
 local function addonFont(fileName)
     return ADDON_FONT_PATH .. fileName
@@ -124,9 +138,29 @@ T.fontThemes = {
         tiny      = {addonFont("FrescitoRegular.ttf"), 11, ""},
         status    = {addonFont("FrescitoBold.ttf"),    12, "OUTLINE"},
     },
+    highLegibility = {
+        title     = {addonFont("FrescitoBold.ttf"),    26, ""},
+        header    = {addonFont("FrescitoBold.ttf"),    17, ""},
+        subheader = {addonFont("FrescitoBold.ttf"),    15, ""},
+        nav       = {addonFont("FrescitoRegular.ttf"), 14, ""},
+        body      = {addonFont("FrescitoRegular.ttf"), 13, ""},
+        label     = {addonFont("FrescitoRegular.ttf"), 13, ""},
+        input     = {addonFont("FrescitoRegular.ttf"), 13, ""},
+        data      = {addonFont("FrescitoRegular.ttf"), 12, ""},
+        dataLarge = {addonFont("FrescitoBold.ttf"),    17, ""},
+        small     = {addonFont("FrescitoRegular.ttf"), 12, ""},
+        tiny      = {addonFont("FrescitoRegular.ttf"), 11, ""},
+        status    = {addonFont("FrescitoBold.ttf"),    12, "OUTLINE"},
+    },
 }
 
-local FONT_THEME_ORDER = {"wowDefault", "magenta", "frescito"}
+local FONT_THEME_ORDER = {"wowDefault", "highLegibility", "magenta", "frescito"}
+local FONT_THEME_LABELS = {
+    wowDefault = "WoW Default",
+    highLegibility = "High Legibility",
+    magenta = "Magenta",
+    frescito = "Frescito",
+}
 T.f = T.fontThemes.wowDefault
 
 -- Class colors for roster display
@@ -430,6 +464,27 @@ local function trackTexture(texture, colorKey, alphaOverride)
     end
 end
 
+local function colorTexture(texture, c)
+    if texture and c then
+        texture:SetColorTexture(c[1], c[2], c[3], c[4] or 1)
+    end
+end
+
+local function colorVertex(texture, c)
+    if texture and c then
+        texture:SetVertexColor(c[1], c[2], c[3], c[4] or 1)
+    end
+end
+
+local function addRoundedCorner(parent, layer, sublevel, point, texturePath, radius, c)
+    local corner = parent:CreateTexture(nil, layer, nil, sublevel)
+    corner:SetSize(radius, radius)
+    corner:SetPoint(point)
+    corner:SetTexture(texturePath)
+    corner:SetVertexColor(c[1], c[2], c[3], c[4] or 1)
+    return corner
+end
+
 local function applyFontStringColor(fontString, colorKey)
     local c = colorKey and T.c[colorKey]
     if fontString and c then
@@ -458,6 +513,10 @@ function T.GetFontThemeKeys()
     return FONT_THEME_ORDER
 end
 
+function T.GetFontThemeLabel(name)
+    return FONT_THEME_LABELS[name] or tostring(name or "Font")
+end
+
 function T.SetFontTheme(name)
     local themeName = resolveFontThemeName(name)
     T.activeFontTheme = themeName
@@ -470,6 +529,21 @@ function T.SetFontTheme(name)
     return themeName
 end
 
+function T.GetTextScale()
+    local settings = GC.DB and GC.DB.GetSettings and GC.DB:GetSettings()
+    return math.max(1, math.min(1.3, tonumber(settings and settings.textScale) or 1))
+end
+
+function T.SetTextScale(value)
+    local scale = math.max(1, math.min(1.3, tonumber(value) or 1))
+    local settings = GC.DB and GC.DB.GetSettings and GC.DB:GetSettings()
+    if settings then
+        settings.textScale = scale
+    end
+    T:RefreshRegistered()
+    return scale
+end
+
 function T.GetFont(role)
     local fontTheme = T.fontThemes[T.GetFontThemeName()] or T.fontThemes.wowDefault
     local fd = fontTheme[role] or fontTheme.body or T.fontThemes.wowDefault.body
@@ -477,7 +551,9 @@ function T.GetFont(role)
     if not path or path == "" then
         path = FALLBACK_FONT
     end
-    return {path, fd and fd[2] or 12, fd and fd[3] or ""}
+    local baseSize = fd and fd[2] or 12
+    local scaledSize = math.floor((baseSize * T.GetTextScale()) + 0.5)
+    return {path, scaledSize, fd and fd[3] or ""}
 end
 
 function T.ApplyFont(fontString, role)
@@ -568,21 +644,146 @@ function T.Tooltip(frame, title, body)
     end)
 end
 
--- Apply solid color background to a frame. border (optional) draws 1px edges.
-function T.Bg(frame, c, border)
-    if GC.Perf then GC.Perf:CountUI("textures", border and 5 or 1) end
+function T.RoundedSurface(frame, c, border, radius, layer, sublevel)
+    radius = radius or T.cornerRadius or 8
+    layer = layer or "BACKGROUND"
+    sublevel = sublevel or -8
+    if GC.Perf then GC.Perf:CountUI("textures", border and 17 or 9) end
+
+    local surface = {fillRects = {}, fillCorners = {}, borderRects = {}, borderCorners = {}}
+
+    local function addFill()
+        local tex = frame:CreateTexture(nil, layer, nil, sublevel)
+        surface.fillRects[#surface.fillRects + 1] = tex
+        return tex
+    end
+
+    local center = addFill()
+    center:SetPoint("TOPLEFT", frame, "TOPLEFT", radius, 0)
+    center:SetPoint("BOTTOMRIGHT", frame, "BOTTOMRIGHT", -radius, 0)
+
+    local left = addFill()
+    left:SetPoint("TOPLEFT", frame, "TOPLEFT", 0, -radius)
+    left:SetPoint("BOTTOMLEFT", frame, "BOTTOMLEFT", 0, radius)
+    left:SetWidth(radius)
+
+    local right = addFill()
+    right:SetPoint("TOPRIGHT", frame, "TOPRIGHT", 0, -radius)
+    right:SetPoint("BOTTOMRIGHT", frame, "BOTTOMRIGHT", 0, radius)
+    right:SetWidth(radius)
+
+    surface.fillCorners[#surface.fillCorners + 1] = addRoundedCorner(frame, layer, sublevel, "TOPLEFT", ROUNDED_CORNERS.tl, radius, c)
+    surface.fillCorners[#surface.fillCorners + 1] = addRoundedCorner(frame, layer, sublevel, "TOPRIGHT", ROUNDED_CORNERS.tr, radius, c)
+    surface.fillCorners[#surface.fillCorners + 1] = addRoundedCorner(frame, layer, sublevel, "BOTTOMLEFT", ROUNDED_CORNERS.bl, radius, c)
+    surface.fillCorners[#surface.fillCorners + 1] = addRoundedCorner(frame, layer, sublevel, "BOTTOMRIGHT", ROUNDED_CORNERS.br, radius, c)
+
+    local top = addFill()
+    top:SetPoint("TOPLEFT", frame, "TOPLEFT", radius, 0)
+    top:SetPoint("TOPRIGHT", frame, "TOPRIGHT", -radius, 0)
+    top:SetHeight(radius)
+
+    local bottom = addFill()
+    bottom:SetPoint("BOTTOMLEFT", frame, "BOTTOMLEFT", radius, 0)
+    bottom:SetPoint("BOTTOMRIGHT", frame, "BOTTOMRIGHT", -radius, 0)
+    bottom:SetHeight(radius)
+
+    function surface:SetColorTexture(r, g, b, a)
+        for _, tex in ipairs(self.fillRects) do
+            tex:SetColorTexture(r, g, b, a or 1)
+        end
+        for _, tex in ipairs(self.fillCorners) do
+            tex:SetVertexColor(r, g, b, a or 1)
+        end
+    end
+
+    function surface:SetAlpha(alpha)
+        for _, tex in ipairs(self.fillRects) do tex:SetAlpha(alpha) end
+        for _, tex in ipairs(self.fillCorners) do tex:SetAlpha(alpha) end
+        for _, tex in ipairs(self.borderRects) do tex:SetAlpha(alpha) end
+        for _, tex in ipairs(self.borderCorners) do tex:SetAlpha(alpha) end
+    end
+
+    surface:SetColorTexture(c[1], c[2], c[3], c[4] or 1)
+
+    if border then
+        local function addBorderTexture()
+            local tex = frame:CreateTexture(nil, layer, nil, sublevel + 1)
+            surface.borderRects[#surface.borderRects + 1] = tex
+            return tex
+        end
+
+        local topEdge = addBorderTexture()
+        topEdge:SetPoint("TOPLEFT", frame, "TOPLEFT", radius, 0)
+        topEdge:SetPoint("TOPRIGHT", frame, "TOPRIGHT", -radius, 0)
+        topEdge:SetHeight(1)
+
+        local bottomEdge = addBorderTexture()
+        bottomEdge:SetPoint("BOTTOMLEFT", frame, "BOTTOMLEFT", radius, 0)
+        bottomEdge:SetPoint("BOTTOMRIGHT", frame, "BOTTOMRIGHT", -radius, 0)
+        bottomEdge:SetHeight(1)
+
+        local leftEdge = addBorderTexture()
+        leftEdge:SetPoint("TOPLEFT", frame, "TOPLEFT", 0, -radius)
+        leftEdge:SetPoint("BOTTOMLEFT", frame, "BOTTOMLEFT", 0, radius)
+        leftEdge:SetWidth(1)
+
+        local rightEdge = addBorderTexture()
+        rightEdge:SetPoint("TOPRIGHT", frame, "TOPRIGHT", 0, -radius)
+        rightEdge:SetPoint("BOTTOMRIGHT", frame, "BOTTOMRIGHT", 0, radius)
+        rightEdge:SetWidth(1)
+
+        surface.borderCorners[#surface.borderCorners + 1] = addRoundedCorner(frame, layer, sublevel + 1, "TOPLEFT", ROUNDED_BORDER_CORNERS.tl, radius, border)
+        surface.borderCorners[#surface.borderCorners + 1] = addRoundedCorner(frame, layer, sublevel + 1, "TOPRIGHT", ROUNDED_BORDER_CORNERS.tr, radius, border)
+        surface.borderCorners[#surface.borderCorners + 1] = addRoundedCorner(frame, layer, sublevel + 1, "BOTTOMLEFT", ROUNDED_BORDER_CORNERS.bl, radius, border)
+        surface.borderCorners[#surface.borderCorners + 1] = addRoundedCorner(frame, layer, sublevel + 1, "BOTTOMRIGHT", ROUNDED_BORDER_CORNERS.br, radius, border)
+
+        function surface:SetBorderColor(r, g, b, a)
+            for _, tex in ipairs(self.borderRects) do
+                tex:SetColorTexture(r, g, b, a or 1)
+            end
+            for _, tex in ipairs(self.borderCorners) do
+                tex:SetVertexColor(r, g, b, a or 1)
+            end
+        end
+
+        surface:SetBorderColor(border[1], border[2], border[3], border[4] or 1)
+    end
+
+    return surface
+end
+
+-- Apply a themed background to a frame. Bordered surfaces use rounded corners
+-- by default; pass {square = true} as the fourth argument to keep hard edges.
+function T.Bg(frame, c, border, opts)
     local bgKey = colorKeyFor(c)
     local borderKey = colorKeyFor(border)
+    local rounded = opts and opts.rounded or (border and not (opts and opts.square))
+
+    if rounded then
+        local bg = T.RoundedSurface(frame, c, border, opts and opts.radius or T.cornerRadius)
+        frame._bg = bg
+        if bgKey or borderKey then
+            T:RegisterRefresh(function()
+                local fill = bgKey and T.c[bgKey] or c
+                if fill and bg.SetColorTexture then bg:SetColorTexture(fill[1], fill[2], fill[3], fill[4] or 1) end
+                local edge = borderKey and T.c[borderKey] or border
+                if edge and bg.SetBorderColor then bg:SetBorderColor(edge[1], edge[2], edge[3], edge[4] or 1) end
+            end)
+        end
+        return bg
+    end
+
+    if GC.Perf then GC.Perf:CountUI("textures", border and 5 or 1) end
     local bg = frame:CreateTexture(nil, "BACKGROUND", nil, -8)
     bg:SetAllPoints()
-    bg:SetColorTexture(c[1], c[2], c[3], c[4] or 1)
+    colorTexture(bg, c)
     trackTexture(bg, bgKey)
     frame._bg = bg
     if border then
         local b = border
         local function edge()
             local e = frame:CreateTexture(nil, "BACKGROUND", nil, -7)
-            e:SetColorTexture(b[1], b[2], b[3], b[4] or 1)
+            colorTexture(e, b)
             trackTexture(e, borderKey)
             return e
         end

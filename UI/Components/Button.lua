@@ -25,7 +25,7 @@ local TYPE_COLORS = {
 -- @param label   Button text
 -- @param bType   "primary" | "secondary" | "warning" | "danger" | "success"
 -- @param w, h    Dimensions (optional, defaults 120×24)
--- @returns button frame with :SetLabel(), :SetEnabled()
+-- @returns button frame with :SetLabel(), :SetEnabled(), :SetActive()
 local function createStyledButton(parent, label, bType, w, h, template)
     local T = theme()
     bType = bType or "secondary"
@@ -45,27 +45,25 @@ local function createStyledButton(parent, label, bType, w, h, template)
     end
     btn:SetSize(w, h)
 
-    -- Background texture (exposed as btn._bg for external active-state control)
-    local bg = btn:CreateTexture(nil, "BACKGROUND")
-    bg:SetAllPoints()
-    bg:SetColorTexture(cn[1], cn[2], cn[3], cn[4] or 1)
+    -- Background surface (exposed as btn._bg for external active-state control)
+    local bg = T.RoundedSurface(btn, cn, T.c.border, 6, "BACKGROUND", -8)
     btn._bg = bg
 
     -- Top-edge highlight (subtle 1px lighter strip)
     local shine = btn:CreateTexture(nil, "BORDER")
-    shine:SetPoint("TOPLEFT"); shine:SetPoint("TOPRIGHT"); shine:SetHeight(1)
-    shine:SetColorTexture(1, 1, 1, 0.06)
+    shine:SetPoint("TOPLEFT", btn, "TOPLEFT", 6, 0)
+    shine:SetPoint("TOPRIGHT", btn, "TOPRIGHT", -6, 0)
+    shine:SetHeight(1)
+    shine:SetColorTexture(1, 1, 1, 0.035)
 
     -- Bottom-edge shadow
     local shadow = btn:CreateTexture(nil, "BORDER")
-    shadow:SetPoint("BOTTOMLEFT"); shadow:SetPoint("BOTTOMRIGHT"); shadow:SetHeight(1)
-    shadow:SetColorTexture(0, 0, 0, 0.25)
+    shadow:SetPoint("BOTTOMLEFT", btn, "BOTTOMLEFT", 6, 0)
+    shadow:SetPoint("BOTTOMRIGHT", btn, "BOTTOMRIGHT", -6, 0)
+    shadow:SetHeight(1)
+    shadow:SetColorTexture(0, 0, 0, 0.12)
 
-    -- Border
-    local bdr = btn:CreateTexture(nil, "BACKGROUND", nil, -7)
-    bdr:SetPoint("TOPLEFT", -1, 1); bdr:SetPoint("BOTTOMRIGHT", 1, -1)
-    local bc = T.c.border
-    bdr:SetColorTexture(bc[1], bc[2], bc[3], 0.6)
+    local bdr = bg
 
     -- Label
     local fs = btn:CreateFontString(nil, "OVERLAY")
@@ -78,34 +76,58 @@ local function createStyledButton(parent, label, bType, w, h, template)
     -- State
     local enabled = true
     local hovered = false
+    local active = false
 
     local function setBg(colorKey)
         local c = theme().c[colorKey]
         bg:SetColorTexture(c[1], c[2], c[3], c[4] or 1)
     end
 
+    local function setType(nextType)
+        bType = nextType or "secondary"
+        keys = TYPE_COLORS[bType] or TYPE_COLORS.secondary
+        normalKey = keys[1]
+        hoverKey = keys[2]
+    end
+
     local function refreshVisual()
         if enabled then
-            setBg(hovered and hoverKey or normalKey)
+            if active then
+                setBg("btnPrimary")
+            else
+                setBg(hovered and hoverKey or normalKey)
+            end
             fs:SetTextColor(1, 1, 1, 1)
         else
             setBg("btnDisabled")
             fs:SetTextColor(0.35, 0.35, 0.38, 1)
         end
         local bc = theme().c.border
-        bdr:SetColorTexture(bc[1], bc[2], bc[3], 0.6)
+        if bdr.SetBorderColor then
+            bdr:SetBorderColor(bc[1], bc[2], bc[3], 0.34)
+        end
     end
 
     btn:SetScript("OnEnter", function()
         hovered = true
-        if enabled then setBg(hoverKey) end
+        refreshVisual()
     end)
     btn:SetScript("OnLeave", function()
         hovered = false
-        if enabled then setBg(normalKey) end
+        refreshVisual()
     end)
 
     function btn:SetLabel(txt)  fs:SetText(txt or "") end
+
+    function btn:SetVisualType(nextType)
+        setType(nextType)
+        refreshVisual()
+    end
+
+    function btn:SetActive(state)
+        active = state and true or false
+        refreshVisual()
+    end
 
     function btn:SetEnabled(state)
         enabled = state
@@ -123,7 +145,7 @@ local function createStyledButton(parent, label, bType, w, h, template)
         if title then
             btn:SetScript("OnEnter", function(self)
                 hovered = true
-                if enabled then setBg(hoverKey) end
+                refreshVisual()
                 GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
                 GameTooltip:SetText(title, 1, 1, 1, 1, true)
                 if body then GameTooltip:AddLine(body, 0.8, 0.8, 0.8, true) end
@@ -131,17 +153,17 @@ local function createStyledButton(parent, label, bType, w, h, template)
             end)
             btn:SetScript("OnLeave", function()
                 hovered = false
-                if enabled then setBg(normalKey) end
+                refreshVisual()
                 GameTooltip:Hide()
             end)
         else
             btn:SetScript("OnEnter", function()
                 hovered = true
-                if enabled then setBg(hoverKey) end
+                refreshVisual()
             end)
             btn:SetScript("OnLeave", function()
                 hovered = false
-                if enabled then setBg(normalKey) end
+                refreshVisual()
             end)
         end
     end

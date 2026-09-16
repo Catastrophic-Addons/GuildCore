@@ -177,28 +177,12 @@ function MP:SendMessageNow(messageId)
         return
     end
 
-    local payload, previewErr = svc:BuildMessagePreview(messageId, {
-        target = message.targetChannel or "GUILD",
-        limit = 255,
+    GC.UI.SendPreviewPopup:Open(message, {
+        onSent = function()
+            self.selectedMessageId = messageId
+            self:Refresh()
+        end,
     })
-    if not payload then
-        status(previewErr or "Unable to prepare message.", "textDanger")
-        return
-    end
-
-    local ok, err = svc:QueueChunks(payload.preview, {
-        target = message.targetChannel or "GUILD",
-        sourceMessageId = messageId,
-    })
-    if not ok then
-        status(err or "Unable to send message.", "textDanger")
-        return
-    end
-
-    svc:ProcessQueue()
-    self.selectedMessageId = messageId
-    self:Refresh()
-    status("Message sent.", "textSuccess")
 end
 
 function MP:SelectCategory(categoryId)
@@ -500,10 +484,15 @@ local function buildMessageRow(row, item)
 
     local used = item.lastUsedLabel and ("Used " .. item.lastUsedLabel) or "Not sent yet"
     local updated = item.updatedLabel and ("Updated " .. item.updatedLabel) or ""
+    local channelInfo = MS() and MS():GetChannelInfo(item.targetChannel or "GUILD")
+    local channel = channelInfo and channelInfo.label or item.targetChannel or "Guild"
+    if item.targetChannel == "CHANNEL" and trim(item.targetChannelName) ~= "" then
+        channel = channel .. ": " .. trim(item.targetChannelName)
+    end
     local flags = {}
     if item.favorite then flags[#flags + 1] = "Favorite" end
     if item.archived then flags[#flags + 1] = "Archived" end
-    row._meta:SetText(table.concat({ used, updated, table.concat(flags, " / ") }, "   "))
+    row._meta:SetText(table.concat({ channel, used, updated, table.concat(flags, " / ") }, "   "))
 end
 
 function MP:Create(parent)
@@ -530,7 +519,7 @@ function MP:Create(parent)
 
     local titleFs = Th.Fs(frame, "header", "Messages", "textPrimary")
     titleFs:SetPoint("TOPLEFT", P, -P)
-    local subtitleFs = Th.Fs(frame, "small", "Browse saved guild messages. Edit and sending open in focused popups.", "textDimmed")
+    local subtitleFs = Th.Fs(frame, "small", "Browse saved guild messages. Editing and sending open in focused popups.", "textDimmed")
     subtitleFs:SetPoint("LEFT", titleFs, "RIGHT", 10, -1)
 
     self.disabledBanner = Th.Fs(frame, "small", "Messaging module is disabled in Settings.", "textWarn")
@@ -625,9 +614,37 @@ function MP:Create(parent)
     categoryArchiveBtn:SetScript("OnClick", function() self:ToggleSelectedCategoryArchived() end)
     self.categoryArchiveBtn = categoryArchiveBtn
 
+    local categoryToolsBtn = GC.UI.Button.Create(categoriesContent, "Category Tools", "secondary", 164, Th.btnH)
+    categoryToolsBtn:SetPoint("TOPLEFT", categoryNewBtn, "BOTTOMLEFT", 0, -8)
+    self.categoryToolsBtn = categoryToolsBtn
+
     local categoryListFrame = CreateFrame("Frame", nil, categoriesContent)
-    categoryListFrame:SetPoint("TOPLEFT", categoryArchiveBtn, "BOTTOMLEFT", 0, -12)
     categoryListFrame:SetPoint("BOTTOMRIGHT", categoriesContent, "BOTTOMRIGHT", 0, 0)
+    local function layoutCategoryTools(show)
+        self.categoryToolsOpen = show == true
+        for _, button in ipairs({ categoryDeleteBtn, categoryUpBtn, categoryDownBtn, categoryCollapseBtn, categoryArchiveBtn }) do
+            button:SetShown(self.categoryToolsOpen)
+        end
+        if self.categoryToolsOpen then
+            categoryDeleteBtn:ClearAllPoints()
+            categoryDeleteBtn:SetPoint("TOPLEFT", categoryToolsBtn, "BOTTOMLEFT", 0, -8)
+            categoryUpBtn:ClearAllPoints()
+            categoryUpBtn:SetPoint("LEFT", categoryDeleteBtn, "RIGHT", 8, 0)
+            categoryDownBtn:ClearAllPoints()
+            categoryDownBtn:SetPoint("TOPLEFT", categoryDeleteBtn, "BOTTOMLEFT", 0, -8)
+            categoryCollapseBtn:ClearAllPoints()
+            categoryCollapseBtn:SetPoint("LEFT", categoryDownBtn, "RIGHT", 8, 0)
+            categoryArchiveBtn:ClearAllPoints()
+            categoryArchiveBtn:SetPoint("TOPLEFT", categoryDownBtn, "BOTTOMLEFT", 0, -8)
+        end
+        categoryListFrame:ClearAllPoints()
+        categoryListFrame:SetPoint("TOPLEFT", self.categoryToolsOpen and categoryArchiveBtn or categoryToolsBtn, "BOTTOMLEFT", 0, -12)
+        categoryListFrame:SetPoint("BOTTOMRIGHT", categoriesContent, "BOTTOMRIGHT", 0, 0)
+        categoryToolsBtn:SetLabel(self.categoryToolsOpen and "Hide Category Tools" or "Category Tools")
+        if categoryToolsBtn.SetActive then categoryToolsBtn:SetActive(self.categoryToolsOpen) end
+    end
+    categoryToolsBtn:SetScript("OnClick", function() layoutCategoryTools(not self.categoryToolsOpen) end)
+    layoutCategoryTools(false)
     self.categoryList = GC.UI.List.Create(categoryListFrame, CATEGORY_ROW_HEIGHT, buildCategoryRow, function(item)
         categoryInput:SetText(item.name or "")
         self:SelectCategory(item.id)
@@ -676,6 +693,9 @@ function MP:Create(parent)
     self.sendBtn:SetPoint("LEFT", self.messageDeleteBtn, "RIGHT", 8, 0)
     self.sendBtn:SetScript("OnClick", function() self:SendMessageNow() end)
 
+    self.messageToolsBtn = GC.UI.Button.Create(messagesContent, "Tools", "secondary", 64, Th.btnH)
+    self.messageToolsBtn:SetPoint("LEFT", self.sendBtn, "RIGHT", 8, 0)
+
     self.favoriteBtn = GC.UI.Button.Create(messagesContent, "Favorite", "secondary", 78, Th.btnH)
     self.favoriteBtn:SetPoint("TOPLEFT", self.messageNewBtn, "BOTTOMLEFT", 0, -8)
     self.favoriteBtn:SetScript("OnClick", function() self:ToggleSelectedFavorite() end)
@@ -709,12 +729,24 @@ function MP:Create(parent)
     self.importBtn:SetScript("OnClick", function() self:ShowTemplateImport() end)
 
     local messageListFrame = CreateFrame("Frame", nil, messagesContent)
-    messageListFrame:SetPoint("TOPLEFT", self.favoriteBtn, "BOTTOMLEFT", 0, -12)
     messageListFrame:SetPoint("BOTTOMRIGHT", messagesContent, "BOTTOMRIGHT", 0, 0)
+    local function layoutMessageTools(show)
+        self.messageToolsOpen = show == true
+        for _, button in ipairs({ self.favoriteBtn, self.archiveBtn, self.moveUpBtn, self.moveDownBtn, self.exportBtn, self.exportAllBtn, self.importBtn }) do
+            button:SetShown(self.messageToolsOpen)
+        end
+        messageListFrame:ClearAllPoints()
+        messageListFrame:SetPoint("TOPLEFT", self.messageToolsOpen and self.favoriteBtn or self.messageNewBtn, "BOTTOMLEFT", 0, -12)
+        messageListFrame:SetPoint("BOTTOMRIGHT", messagesContent, "BOTTOMRIGHT", 0, 0)
+        self.messageToolsBtn:SetLabel(self.messageToolsOpen and "Hide Tools" or "Tools")
+        if self.messageToolsBtn.SetActive then self.messageToolsBtn:SetActive(self.messageToolsOpen) end
+    end
+    self.messageToolsBtn:SetScript("OnClick", function() layoutMessageTools(not self.messageToolsOpen) end)
+    layoutMessageTools(false)
     self.messageList = GC.UI.List.Create(messageListFrame, MESSAGE_ROW_HEIGHT, buildMessageRow, function(item)
         self:SelectMessage(item.id)
     end)
-    self.messageList:SetEmptyText("No saved messages in this category.")
+    self.messageList:SetEmptyText("No saved messages here yet.")
 
     self:Refresh()
 end
@@ -761,10 +793,14 @@ function MP:Refresh()
     local hasMessage = selectedId ~= nil
     self.showArchivedBtn:SetLabel(self.showArchived and "Archived: On" or "Archived: Off")
     self.favoritesOnlyBtn:SetLabel(self.favoritesOnly and "Favorites: On" or "Favorites: Off")
+    if self.showArchivedBtn.SetActive then self.showArchivedBtn:SetActive(self.showArchived == true) end
+    if self.favoritesOnlyBtn.SetActive then self.favoritesOnlyBtn:SetActive(self.favoritesOnly == true) end
     self.categoryCollapseBtn:SetLabel(selectedCategory.collapsed and "Expand" or "Collapse")
     self.categoryArchiveBtn:SetLabel(selectedCategory.archived and "Unarchive" or "Archive")
     self.favoriteBtn:SetLabel((selectedMessage and selectedMessage.favorite) and "Unfavorite" or "Favorite")
     self.archiveBtn:SetLabel((selectedMessage and selectedMessage.archived) and "Unarchive" or "Archive")
+    if self.favoriteBtn.SetActive then self.favoriteBtn:SetActive(selectedMessage and selectedMessage.favorite == true) end
+    if self.archiveBtn.SetActive then self.archiveBtn:SetActive(selectedMessage and selectedMessage.archived == true) end
 
     setControlEnabled(self.categoryNewBtn, not disabled)
     setControlEnabled(self.categoryRenameBtn, not disabled)

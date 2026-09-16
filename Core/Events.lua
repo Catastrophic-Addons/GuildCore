@@ -9,6 +9,25 @@ GC.Events = CreateFrame("Frame")
 local rosterUpdatePending = false
 local loginScanRequested = false
 
+local function isSecretValue(value)
+    if not issecretvalue then
+        return false
+    end
+    local ok, secret = pcall(issecretvalue, value)
+    return ok and secret == true
+end
+
+local function dispatch(service, method, ...)
+    local target = GC.Services and GC.Services[service]
+    local handler = target and target[method]
+    if not handler then return end
+
+    local ok, err = pcall(handler, target, ...)
+    if not ok then
+        GC:Print(string.format("%s event handler failed: %s", service, tostring(err)))
+    end
+end
+
 -- Start the periodic auto-scan ticker, respecting the settings interval.
 -- Only starts if enableRosterModule is not explicitly false.
 local function startRosterTicker()
@@ -156,43 +175,28 @@ GC.Events:SetScript("OnEvent", function(_, event, ...)
         end
     elseif event == "CHAT_MSG_SYSTEM" then
         local message = ...
-        if GC.Services.OperationsMacro and GC.Services.OperationsMacro.CaptureSystemMessage then
-            GC.Services.OperationsMacro:CaptureSystemMessage(message)
-        end
-        if GC.Services.Messages and GC.Services.Messages.CaptureSystemMessage then
-            GC.Services.Messages:CaptureSystemMessage(message)
-        end
-        if GC.Services.Purge and GC.Services.Purge.CaptureSystemMessage then
-            GC.Services.Purge:CaptureSystemMessage(message)
-        end
-        if GC.Services.InviteProbe and GC.Services.InviteProbe.CaptureSystemMessage then
-            GC.Services.InviteProbe:CaptureSystemMessage(message)
-        end
-        if GC.Services.InviteHistory and GC.Services.InviteHistory.CaptureSystemMessage then
-            GC.Services.InviteHistory:CaptureSystemMessage(message)
-        end
-        if GC.Services.WelcomeBatch and GC.Services.WelcomeBatch.CaptureSystemMessage then
-            GC.Services.WelcomeBatch:CaptureSystemMessage(message)
-        end
+        -- Retail can mark system-message payloads as secret. String operations on
+        -- those values raise before a service can recover, so roster and numeric
+        -- UI events remain the authoritative fallback on those builds.
+        if isSecretValue(message) then return end
+
+        dispatch("OperationsMacro", "CaptureSystemMessage", message)
+        dispatch("Messages", "CaptureSystemMessage", message)
+        dispatch("Purge", "CaptureSystemMessage", message)
+        dispatch("InviteProbe", "CaptureSystemMessage", message)
+        dispatch("InviteHistory", "CaptureSystemMessage", message)
+        dispatch("WelcomeBatch", "CaptureSystemMessage", message)
     elseif event == "UI_ERROR_MESSAGE" then
         local errorType, message = ...
-        if GC.Services.InviteProbe and GC.Services.InviteProbe.CaptureUIError then
-            GC.Services.InviteProbe:CaptureUIError(errorType, message)
-        end
-        if GC.Services.InviteScanner and GC.Services.InviteScanner.HandleUIError then
-            GC.Services.InviteScanner:HandleUIError(errorType, message)
-        end
-        if GC.Services.InviteHistory and GC.Services.InviteHistory.CaptureUIError then
-            GC.Services.InviteHistory:CaptureUIError(errorType, message)
-        end
+        local safeMessage = isSecretValue(message) and nil or message
+        dispatch("InviteProbe", "CaptureUIError", errorType, safeMessage)
+        dispatch("InviteScanner", "HandleUIError", errorType, safeMessage)
+        dispatch("InviteHistory", "CaptureUIError", errorType, safeMessage)
     elseif event == "UI_INFO_MESSAGE" then
         local infoType, message = ...
-        if GC.Services.InviteHistory and GC.Services.InviteHistory.CaptureSystemMessage then
-            GC.Services.InviteHistory:CaptureSystemMessage(message)
-        end
-        if GC.Services.InviteProbe and GC.Services.InviteProbe.CaptureSystemMessage then
-            GC.Services.InviteProbe:CaptureSystemMessage(message)
-        end
+        if isSecretValue(message) then return end
+        dispatch("InviteHistory", "CaptureSystemMessage", message)
+        dispatch("InviteProbe", "CaptureSystemMessage", message)
     elseif event == "WHO_LIST_UPDATE" then
         if GC.Services.InviteScanner and GC.Services.InviteScanner.HandleWhoListUpdate then
             GC.Services.InviteScanner:HandleWhoListUpdate()

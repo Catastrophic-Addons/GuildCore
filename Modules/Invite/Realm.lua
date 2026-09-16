@@ -56,14 +56,17 @@ local MAIN_REALMS = {
     "Eredar",
 }
 
-local HELLSCREAM_CONNECTED_REALMS = {
-    "Hellscream",
-    "Gorefiend",
-    "Spinebreaker",
-    "Zangarmarsh",
-    "Wildhammer",
-    "Eredar",
+local CONNECTED_REALM_GROUPS = {
+    { "Hellscream", "Zangarmarsh" },
+    { "Eredar", "Gorefiend", "Spinebreaker", "Wildhammer" },
 }
+
+local CONNECTED_REALM_GROUP_BY_REALM = {}
+for _, group in ipairs(CONNECTED_REALM_GROUPS) do
+    for _, realm in ipairs(group) do
+        CONNECTED_REALM_GROUP_BY_REALM[realm:lower()] = group
+    end
+end
 
 local MAIN_REALM_SET = {}
 for _, realm in ipairs(MAIN_REALMS) do
@@ -236,11 +239,11 @@ function Realm.GetGuildRealm()
 
     -- Attempt 2: Scan guild roster for the guild master's full name realm suffix.
     -- Requires in-game testing: GuildRoster() may need to be called first to refresh.
-    if GetNumGuildMembers then
-        local total = GetNumGuildMembers()
+    if GC.API and GC.API.GetNumGuildMembers and GC.API.GetGuildRosterInfo then
+        local total = GC.API.GetNumGuildMembers()
         GC:InviteDebug("debug", "Invite Realm: checking guild roster for realm suffix. members=" .. tostring(total))
         for i = 1, math.min(total, 20) do
-            local name, rankName, rankIndex = GetGuildRosterInfo(i)
+            local name, rankName, rankIndex = GC.API.GetGuildRosterInfo(i)
             if name then
                 local shortName, realm = name:match("^([^%-]+)%-(.+)$")
                 local canonical = realm and canonicalMainRealm(realm) or nil
@@ -296,9 +299,10 @@ function Realm.GetConnectedRealmsForGuildRealm(guildRealm)
     if not guildRealm then return {} end
 
     local mainRealm = canonicalMainRealm(guildRealm)
-    if mainRealm then
+    local knownGroup = mainRealm and CONNECTED_REALM_GROUP_BY_REALM[mainRealm:lower()] or nil
+    if knownGroup then
         local realms = {}
-        for _, realm in ipairs(HELLSCREAM_CONNECTED_REALMS) do
+        for _, realm in ipairs(knownGroup) do
             realms[#realms + 1] = realm
         end
         return realms
@@ -339,7 +343,12 @@ end
 function Realm.GetScanRealms(settings)
     settings = settings or inviteSettings()
 
-    local includeConnected    = settings.includeConnectedRealms ~= false
+    local realmScope          = tostring(settings.realmScope or "")
+    if realmScope ~= "guild" and realmScope ~= "connected" and realmScope ~= "all" then
+        realmScope = settings.includeConnectedRealms == false and "guild" or "connected"
+    end
+    local includeConnected    = realmScope == "connected"
+    local includeAllAvailable = realmScope == "all"
     local allowHomeFallback   = settings.allowHomeRealmFallback ~= false
     local neverScanAll        = settings.neverScanAllRealms     ~= false
 
@@ -368,7 +377,11 @@ function Realm.GetScanRealms(settings)
     end
 
     local scanRealms
-    if includeConnected then
+    if includeAllAvailable then
+        -- WHO itself remains a bounded level query. This flag only disables
+        -- Guild Core's local realm rejection for rows Blizzard returns.
+        scanRealms = { anchor }
+    elseif includeConnected then
         scanRealms = Realm.GetConnectedRealmsForGuildRealm(anchor)
     else
         scanRealms = { anchor }
@@ -391,6 +404,8 @@ function Realm.GetScanRealms(settings)
         override    = overrideRealm,
         playerRealm = playerRealm,
         anchor      = anchor,
+        realmScope  = realmScope,
+        allRealms   = includeAllAvailable,
         scanRealms  = scanRealms,
         warning     = warning,
     }

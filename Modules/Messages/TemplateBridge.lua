@@ -202,6 +202,7 @@ function TemplateBridge:ExportTemplates(options)
         lines[#lines + 1] = "categoryName=" .. encodeValue(category and category.name or "General")
         lines[#lines + 1] = "tags=" .. encodeTags(message.tags)
         lines[#lines + 1] = "targetChannel=" .. encodeValue(svc:NormalizeTargetChannel(message.targetChannel or "GUILD"))
+        lines[#lines + 1] = "targetChannelName=" .. encodeValue(message.targetChannelName or "")
         lines[#lines + 1] = "favorite=" .. encodeBool(message.favorite)
         lines[#lines + 1] = "archived=" .. encodeBool(message.archived)
         lines[#lines + 1] = "END_TEMPLATE"
@@ -249,6 +250,7 @@ function TemplateBridge:ParseTemplateExport(text)
             end
             current.tags = normalizeTags(current.tags)
             current.targetChannel = svc:NormalizeTargetChannel(current.targetChannel or "GUILD")
+            current.targetChannelName = trim(current.targetChannelName or "")
             current.favorite = current.favorite == true
             current.archived = current.archived == true
             if current.title == "" then
@@ -262,7 +264,7 @@ function TemplateBridge:ParseTemplateExport(text)
         elseif current and line ~= "" then
             local key, value = line:match("^([^=]+)=(.*)$")
             if key then
-                if key == "title" or key == "body" or key == "notes" or key == "categoryName" or key == "targetChannel" then
+                if key == "title" or key == "body" or key == "notes" or key == "categoryName" or key == "targetChannel" or key == "targetChannelName" then
                     current[key] = decodeValue(value)
                 elseif key == "tags" then
                     current.tags = decodeTags(value)
@@ -387,6 +389,7 @@ function TemplateBridge:ImportTemplates(text)
             categoryId = category.id,
             tags = template.tags,
             targetChannel = template.targetChannel,
+            targetChannelName = template.targetChannelName,
             favorite = template.favorite == true,
             archived = template.archived == true,
         })

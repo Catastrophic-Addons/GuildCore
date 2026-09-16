@@ -264,9 +264,7 @@ function CCM:_getRow(index)
     row:SetHeight(22)
     row:SetPoint("TOPLEFT", self.menu, "TOPLEFT", 6, -30 - ((index - 1) * 24))
     row:SetPoint("TOPRIGHT", self.menu, "TOPRIGHT", -6, -30 - ((index - 1) * 24))
-    local bg = row:CreateTexture(nil, "BACKGROUND")
-    bg:SetAllPoints()
-    bg:SetColorTexture(0, 0, 0, 0)
+    local bg = Th.RoundedSurface(row, {0, 0, 0, 0}, nil, 5, "BACKGROUND", -8)
     row._bg = bg
     row._label = Th.Fs(row, "small", "", "textSecond")
     row._label:SetPoint("LEFT", 8, 0)
@@ -535,8 +533,11 @@ function CCM:_showMainDialog(data)
             return
         end
         local function saveAlt()
-            local ok, err = GC.Services.Alts:SetAlt(data.key, mainKey, "context-menu")
-            status(ok and "Alt link saved." or (err or "Unable to mark alt."), ok and "textSuccess" or "textDanger")
+            local ok, result = GC.Services.Alts:SetAlt(data.key, mainKey, "context-menu")
+            local message = ok
+                and GC.Services.Alts:DescribeLinkResult(result, "Alt link saved.")
+                or (result or "Unable to mark alt.")
+            status(message, ok and "textSuccess" or "textDanger")
             if ok then dialog:Hide(); focusRoster(data) end
         end
         if data.main and data.main ~= mainKey then
@@ -592,14 +593,6 @@ function CCM:RunAction(actionId, characterData)
         return false, err
     end
 
-    local function rankAction(label, fn)
-        confirm("GUILDCORE_CONTEXT_" .. string.upper(actionId), label .. " " .. tostring(data.displayName) .. "?", function()
-            safePlayerAction(data, label, fn)
-            refreshCharacterViews()
-        end)
-        return true
-    end
-
     if actionId == "edit_character" then
         local ok, message = openEditCharacterTab(data)
         if not ok then status(message, "textWarn") end
@@ -631,10 +624,10 @@ function CCM:RunAction(actionId, characterData)
     elseif actionId == "edit_officer_note" then
         self:_showTextDialog("officer", data)
         return true
-    elseif actionId == "promote" then
-        return rankAction("Promote", function() return GC.Services.Operations:Promote(data) end)
-    elseif actionId == "demote" then
-        return rankAction("Demote", function() return GC.Services.Operations:Demote(data) end)
+    elseif actionId == "change_rank" then
+        local ok, message = openEditCharacterTab(data, "actions")
+        if not ok then status(message or "Rank actions are unavailable.", "textWarn") end
+        return ok, message
     elseif actionId == "kick" then
         confirm("GUILDCORE_CONTEXT_KICK", "Kick " .. tostring(data.displayName) .. " from the guild?", function()
             safePlayerAction(data, "Kick", function() return GC.Services.Operations:Kick(data) end)
@@ -732,8 +725,7 @@ function CCM:_buildItems(data)
     item({ label = "Edit Officer Note" .. noteLabelSuffix, actionId = "edit_officer_note", enabled = isOfficer, reason = noteAvailability.reason or "Officer permission required." })
     sep()
 
-    item({ label = "Promote", actionId = "promote", enabled = availability.promote and availability.promote.enabled, reason = availability.promote and availability.promote.reason })
-    item({ label = "Demote", actionId = "demote", enabled = availability.demote and availability.demote.enabled, reason = availability.demote and availability.demote.reason })
+    item({ label = "Change Rank...", actionId = "change_rank", enabled = (availability.promote and availability.promote.enabled) or (availability.demote and availability.demote.enabled), reason = "No rank changes are available." })
     item({ label = "Kick from Guild", actionId = "kick", danger = true, enabled = availability.kick and availability.kick.enabled, reason = availability.kick and availability.kick.reason })
     sep()
 

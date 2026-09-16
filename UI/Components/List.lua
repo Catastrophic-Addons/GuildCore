@@ -98,10 +98,12 @@ function List.Create(parent, rowH, buildRow, onSelect, onContext)
             -- Backgrounds: base and hover overlay
             local base = row:CreateTexture(nil, "BACKGROUND", nil, -8)
             base:SetAllPoints()
-            local hov  = row:CreateTexture(nil, "BACKGROUND", nil, -7)
-            hov:SetAllPoints(); hov:SetAlpha(0)
-            local sel  = row:CreateTexture(nil, "BACKGROUND", nil, -6)
-            sel:SetAllPoints(); sel:SetAlpha(0)
+            local hc = Th.c.rowHover
+            local hov  = Th.RoundedSurface(row, {hc[1], hc[2], hc[3], hc[4] or 1}, nil, 5, "BACKGROUND", -7)
+            hov:SetAlpha(0)
+            local sc = Th.c.rowSelected
+            local sel  = Th.RoundedSurface(row, {sc[1], sc[2], sc[3], sc[4] or 1}, nil, 5, "BACKGROUND", -6)
+            sel:SetAlpha(0)
             -- Left selection accent bar
             local bar  = row:CreateTexture(nil, "ARTWORK")
             bar:SetWidth(2); bar:SetPoint("TOPLEFT"); bar:SetPoint("BOTTOMLEFT")

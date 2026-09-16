@@ -57,8 +57,8 @@ local METRIC_GROUPS = {
         title = "Officer Work Queue",
         key = "work",
         items = {
-            {key = "initiatesNeedingReview", label = "Initiates Needing Review", target = "roster_initiates"},
-            {key = "missingDiscordVerification", label = "Missing Discord Verification", target = "roster_missing_discord"},
+            {key = "initiatesNeedingReview", label = "Initiates to Review", target = "roster_initiates"},
+            {key = "missingDiscordVerification", label = "Missing Discord", target = "roster_missing_discord"},
             {key = "unlinkedCharacters", label = "Unlinked / Unknown", target = "roster_unknown_main_alt"},
             {key = "rosterDataIssues", label = "Roster Data Issues", target = "roster_relationship_issues"},
             {key = "inactiveMembers", label = "Ready for Purge", target = "purge_ready"},
@@ -89,10 +89,17 @@ local function dashboardSettings()
     if dashboard.showHealth == nil then dashboard.showHealth = true end
     if dashboard.showTrends == nil then dashboard.showTrends = true end
     if dashboard.showIcons == nil then dashboard.showIcons = true end
-    if dashboard.showQuickActions == nil then dashboard.showQuickActions = true end
+    if dashboard.showQuickActions == nil then dashboard.showQuickActions = false end
+    if dashboard.focusMode == nil then dashboard.focusMode = true end
     dashboard.hiddenCards = type(dashboard.hiddenCards) == "table" and dashboard.hiddenCards or {}
     dashboard.snapshotThrottleSeconds = tonumber(dashboard.snapshotThrottleSeconds) or 900
     return dashboard
+end
+
+local function shouldShowMetricGroup(settings, group)
+    if not group then return false end
+    if settings and settings.focusMode == false then return true end
+    return group.key == "overview"
 end
 
 local function dashboardSnapshots()
@@ -111,6 +118,94 @@ local function colorForState(state)
     if state == "warning" then return Th.c.textWarn or Th.c.statusWarn or Th.c.textAccent end
     if state == "danger" then return Th.c.textDanger or Th.c.statusInact or Th.c.textWarn end
     return Th.c.accent
+end
+
+local function recommendedAction(metrics, noScan, attentionRows)
+    metrics = metrics or {}
+    if noScan then
+        return {
+            title = "Start with fresh roster data",
+            body = "Run a scan before reviewing health, purge, or invite decisions.",
+            button = "Run Scan",
+            target = "invite_scan",
+            state = "warning",
+            confidence = "High",
+            reason = "Roster data is missing, so every downstream recommendation is less reliable.",
+            dataUsed = "Scan timestamp",
+        }
+    end
+    if (metrics.rosterDataIssues or 0) > 0 then
+        return {
+            title = "Review roster relationships",
+            body = tostring(metrics.rosterDataIssues or 0) .. " relationship issue(s) need officer review.",
+            button = "Review",
+            target = "roster_relationship_issues",
+            state = "danger",
+            confidence = "High",
+            reason = "Roster relationship issues are blocking clean main/alt context.",
+            dataUsed = "Roster data issues",
+        }
+    end
+    if (metrics.inactiveMembers or 0) > 0 then
+        return {
+            title = "Review purge candidates",
+            body = tostring(metrics.inactiveMembers or 0) .. " member(s) may be ready for purge review.",
+            button = "Open Purge",
+            target = "purge_ready",
+            state = "danger",
+            confidence = "Medium",
+            reason = "Inactive members are ready for officer review before any removal action.",
+            dataUsed = "Inactivity rules, last seen",
+        }
+    end
+    if (metrics.unlinkedCharacters or 0) > 0 then
+        return {
+            title = "Classify main and alt status",
+            body = tostring(metrics.unlinkedCharacters or 0) .. " character(s) are still unknown or unlinked.",
+            button = "Review",
+            target = "roster_unknown_main_alt",
+            state = "warning",
+            confidence = "High",
+            reason = "Unknown main/alt status reduces confidence in roster and purge decisions.",
+            dataUsed = "Main/alt classification",
+        }
+    end
+    if (metrics.missingDiscordVerification or 0) > 0 then
+        return {
+            title = "Check Discord verification",
+            body = tostring(metrics.missingDiscordVerification or 0) .. " member(s) need Discord verification review.",
+            button = "Review",
+            target = "roster_missing_discord",
+            state = "warning",
+            confidence = "High",
+            reason = "Discord verification checks found members needing review.",
+            dataUsed = "Officer data, compliance settings",
+        }
+    end
+    if attentionRows and #attentionRows > 0 then
+        local first = attentionRows[1]
+        return {
+            title = first.issue or "Review officer queue",
+            body = first.character and ("Suggested action for " .. tostring(first.character) .. ".") or "There is an item waiting in the officer queue.",
+            button = "Open",
+            target = first.target or "roster_character",
+            payload = first,
+            state = first.state or "warning",
+            confidence = "Medium",
+            reason = "This is the first item in the current officer queue.",
+            dataUsed = "Officer work queue",
+        }
+    end
+    return {
+        title = "Guild operations are quiet",
+        body = "No urgent officer action is waiting right now.",
+        button = "Activity",
+        target = "activity_all",
+        state = "healthy",
+        confidence = "High",
+        reason = "No tracked health, compliance, or roster queue item is currently urgent.",
+        dataUsed = "Dashboard metrics, officer queue",
+    }
 end
 
 local function showStatus(message, colorKey)
@@ -140,8 +235,8 @@ local function buildRepairPreviewText(preview, result)
         lines[#lines + 1] = string.format("Safe repairs ready: %d. Manual review items: %d.", safeCount, manualCount)
     end
     lines[#lines + 1] = ""
-    lines[#lines + 1] = "Safe repairs are non-destructive relationship cleanup only."
-    lines[#lines + 1] = "Manual-review items are not fixed automatically; Guild Core will not guess a missing Main."
+    lines[#lines + 1] = "Safe repairs only clean up relationship data."
+    lines[#lines + 1] = "Manual-review items are not changed automatically; Guild Core will not guess a missing Main."
     lines[#lines + 1] = "This does not change notes, Discord, join dates, rank history, points, settings, or imported metadata."
 
     if preview.actions and #preview.actions > 0 then
@@ -203,15 +298,13 @@ local function createMetricCard(parent, def)
     Th.Bg(f, Th.c.panelAlt, Th.c.border)
 
     local stripe = f:CreateTexture(nil, "ARTWORK")
-    stripe:SetPoint("TOPLEFT"); stripe:SetPoint("TOPRIGHT"); stripe:SetHeight(3)
+    stripe:SetPoint("TOPLEFT"); stripe:SetPoint("TOPRIGHT"); stripe:SetHeight(2)
     local a = Th.c.accent
-    stripe:SetColorTexture(a[1], a[2], a[3], 0.55)
+    stripe:SetColorTexture(a[1], a[2], a[3], 0.34)
     f._stripe = stripe
 
-    local hover = f:CreateTexture(nil, "BACKGROUND", nil, -5)
-    hover:SetAllPoints()
     local h = Th.c.rowHover
-    hover:SetColorTexture(h[1], h[2], h[3], h[4] or 0.35)
+    local hover = Th.RoundedSurface(f, {h[1], h[2], h[3], h[4] or 0.35}, nil, 8, "BACKGROUND", -5)
     hover:SetAlpha(0)
     f._hover = hover
 
@@ -241,7 +334,7 @@ local function createMetricCard(parent, def)
         f._icon = icon
     end
 
-    local hint = Th.Fs(f, "tiny", "open", "textDimmed")
+    local hint = Th.Fs(f, "tiny", "Open", "textDimmed")
     hint:SetPoint("BOTTOMRIGHT", f, "BOTTOMRIGHT", -8, 5)
     hint:SetAlpha(def.target and 0.45 or 0)
     f._hint = hint
@@ -254,11 +347,73 @@ local function createMetricCard(parent, def)
     return f
 end
 
+local function createActionTile(parent, def)
+    local Th = T()
+    local f = CreateFrame("Button", nil, parent)
+    Th.Bg(f, Th.c.panelAlt, Th.c.border)
+
+    local h = Th.c.rowHover
+    local hover = Th.RoundedSurface(f, {h[1], h[2], h[3], h[4] or 0.35}, nil, 8, "BACKGROUND", -5)
+    hover:SetAlpha(0)
+    f._hover = hover
+
+    local icon = f:CreateTexture(nil, "ARTWORK")
+    icon:SetSize(30, 30)
+    icon:SetPoint("TOPLEFT", f, "TOPLEFT", 14, -14)
+    local ok = icon:SetTexture(def.icon or "Interface\\Buttons\\UI-GuildButton-PublicNote-Up")
+    if ok == false then icon:Hide() end
+    icon:SetAlpha(0.72)
+    f._icon = icon
+
+    local value = Th.Fs(f, "dataLarge", def.value or "", "textPrimary")
+    value:SetPoint("TOPRIGHT", f, "TOPRIGHT", -14, -15)
+    value:SetJustifyH("RIGHT")
+    f._value = value
+
+    local title = Th.Fs(f, "subheader", def.label or "", "textAccent")
+    title:SetPoint("TOPLEFT", f, "TOPLEFT", 14, -52)
+    title:SetPoint("TOPRIGHT", f, "TOPRIGHT", -14, -52)
+    title:SetJustifyH("LEFT")
+    f._title = title
+
+    local meta = Th.Fs(f, "small", def.meta or "", "textDimmed")
+    meta:SetPoint("TOPLEFT", title, "BOTTOMLEFT", 0, -5)
+    meta:SetPoint("TOPRIGHT", f, "TOPRIGHT", -14, -76)
+    meta:SetJustifyH("LEFT")
+    meta:SetWordWrap(false)
+    f._meta = meta
+
+    local hint = Th.Fs(f, "tiny", "Open", "textDimmed")
+    hint:SetPoint("BOTTOMRIGHT", f, "BOTTOMRIGHT", -14, 10)
+    hint:SetAlpha(0.45)
+    f._hint = hint
+
+    decorateClickable(f)
+    f:SetScript("OnClick", function()
+        if def.onClick then
+            def.onClick(f)
+        elseif def.target then
+            DB:NavigateTo(def.target)
+        end
+    end)
+
+    function f:SetValue(text, color)
+        self._value:SetText(text or "")
+        if color then self._value:SetTextColor(color[1], color[2], color[3], color[4] or 1) end
+    end
+
+    function f:SetMeta(text)
+        self._meta:SetText(text or "")
+    end
+
+    return f
+end
+
 local function buildActionQueueRow(row, item)
     local Th = T()
     if not row._built then
         local marker = row:CreateTexture(nil, "ARTWORK")
-        marker:SetPoint("TOPLEFT"); marker:SetPoint("BOTTOMLEFT"); marker:SetWidth(3)
+        marker:SetPoint("TOPLEFT"); marker:SetPoint("BOTTOMLEFT"); marker:SetWidth(2)
         row._marker = marker
 
         local nameFs = Th.Fs(row, "small", "", "textPrimary")
@@ -339,6 +494,12 @@ function DB:CreateEmptyState(parent, title, subtitle)
     function frame:SetMessage(newTitle, newSubtitle)
         self.titleFs:SetText(newTitle or "")
         self.subtitleFs:SetText(newSubtitle or "")
+    end
+
+    function frame:SetInset(top, bottom)
+        self:ClearAllPoints()
+        self:SetPoint("TOPLEFT", parent, "TOPLEFT", 0, -(top or 0))
+        self:SetPoint("BOTTOMRIGHT", parent, "BOTTOMRIGHT", 0, bottom or 0)
     end
 
     return frame
@@ -474,7 +635,7 @@ end
 function DB:SetMetricState(card, state)
     if not card then return end
     local c = colorForState(state)
-    if card._stripe then card._stripe:SetColorTexture(c[1], c[2], c[3], state == "neutral" and 0.45 or 0.85) end
+    if card._stripe then card._stripe:SetColorTexture(c[1], c[2], c[3], state == "neutral" and 0.24 or 0.46) end
     if card._value then card._value:SetTextColor(c[1], c[2], c[3], c[4] or 1) end
 end
 
@@ -484,9 +645,22 @@ function DB:ApplyDashboardSettings(settings)
     for _, btn in ipairs(self.quickButtons or {}) do
         btn:SetShown(settings.showQuickActions ~= false)
     end
+    for _, group in ipairs(METRIC_GROUPS) do
+        local showGroup = shouldShowMetricGroup(settings, group)
+        if self.groupHeaders and self.groupHeaders[group.key] then
+            self.groupHeaders[group.key]:SetShown(showGroup)
+        end
+        for _, def in ipairs(group.items or {}) do
+            local card = self.metricCards and self.metricCards[def.key]
+            if card then
+                local hidden = settings.hiddenCards and settings.hiddenCards[def.key] == true
+                card:SetShown(showGroup and not hidden)
+            end
+        end
+    end
     for key, card in pairs(self.metricCards or {}) do
         local hidden = settings.hiddenCards and settings.hiddenCards[key] == true
-        card:SetShown(not hidden)
+        if hidden then card:SetShown(false) end
         if card._icon then card._icon:SetShown(settings.showIcons ~= false) end
         if card._trend then card._trend:SetShown(settings.showTrends ~= false) end
     end
@@ -599,6 +773,84 @@ function DB:NavigateTo(target, payload)
     finish()
 end
 
+function DB:ShowReviewQueue()
+    if not self.attentionFrame then return end
+    self._reviewQueueOpen = true
+    self.attentionFrame:Show()
+    if self.attentionList and self._attentionRows then
+        local hasRows = #self._attentionRows > 0
+        self.attentionList:Refresh(hasRows and self._attentionRows or {})
+    end
+end
+
+function DB:HideReviewQueue()
+    self._reviewQueueOpen = false
+    if self.attentionFrame then self.attentionFrame:Hide() end
+end
+
+function DB:RefreshRelationshipRepairSummary(preview)
+    local service = GC.Modules and GC.Modules.RosterRelationships
+    if not service or not service.BuildRepairPreview then
+        if self.relationshipRepairPanel then self.relationshipRepairPanel:Hide() end
+        return nil
+    end
+
+    preview = preview or service:BuildRepairPreview()
+    self._relationshipRepairPreview = preview
+    local safeCount = preview.summary and preview.summary.safeActions or #(preview.actions or {})
+    local manualCount = preview.summary and preview.summary.manualReview or #(preview.unsafe or {})
+    local hasWork = safeCount > 0 or manualCount > 0
+
+    if self.relationshipRepairPanel then
+        self.relationshipRepairPanel:SetShown(hasWork)
+    end
+    if self.relationshipRepairSummary then
+        if safeCount > 0 then
+            self.relationshipRepairSummary:SetText(string.format("%d safe relationship cleanup(s) available. %d manual item(s) remain.", safeCount, manualCount))
+            self.relationshipRepairSummary:SetTextColor(T().c.textWarn[1], T().c.textWarn[2], T().c.textWarn[3], T().c.textWarn[4] or 1)
+        elseif manualCount > 0 then
+            self.relationshipRepairSummary:SetText(string.format("%d relationship item(s) need manual officer review.", manualCount))
+            self.relationshipRepairSummary:SetTextColor(T().c.textSecond[1], T().c.textSecond[2], T().c.textSecond[3], T().c.textSecond[4] or 1)
+        else
+            self.relationshipRepairSummary:SetText("")
+        end
+    end
+    if self.relationshipRepairApplyBtn then
+        self.relationshipRepairApplyBtn:SetEnabled(safeCount > 0)
+    end
+    if self.relationshipRepairPreviewBtn then
+        self.relationshipRepairPreviewBtn:SetEnabled(hasWork)
+    end
+    return preview
+end
+
+function DB:ApplySafeRelationshipRepairs()
+    local service = GC.Modules and GC.Modules.RosterRelationships
+    if not service or not service.ApplyRepairPreview then
+        showStatus("Relationship repair service is unavailable.", "textDanger")
+        return
+    end
+    local preview = self._relationshipRepairPreview or (service.BuildRepairPreview and service:BuildRepairPreview()) or nil
+    if not preview then return end
+    local safeCount = preview.summary and preview.summary.safeActions or #(preview.actions or {})
+    if safeCount <= 0 then
+        showStatus("No safe relationship repairs are available.", "textWarn")
+        return
+    end
+
+    local result = service:ApplyRepairPreview(preview)
+    local nextPreview = service:BuildRepairPreview()
+    self._reviewQueueOpen = true
+    self:RefreshRelationshipRepairSummary(nextPreview)
+    showStatus(
+        string.format("Safe repairs applied: %d. Manual items remaining: %d.", result.applied or 0, nextPreview.summary and nextPreview.summary.manualReview or 0),
+        (result.applied or 0) > 0 and "textSuccess" or "textWarn"
+    )
+    if GC.UI.RosterPanel and GC.UI.RosterPanel.Refresh then GC.UI.RosterPanel:Refresh() end
+    if GC.UI.PlayerPanel and GC.UI.PlayerPanel.Refresh then GC.UI.PlayerPanel:Refresh() end
+    self:Refresh()
+end
+
 function DB:Create(parent)
     if self.frame then return end
     local Th = T()
@@ -616,25 +868,16 @@ function DB:Create(parent)
     guildCard:SetHeight(52)
     Th.Bg(guildCard, Th.c.chrome, Th.c.border)
     local guildStripe = guildCard:CreateTexture(nil, "ARTWORK")
-    guildStripe:SetPoint("TOPLEFT"); guildStripe:SetPoint("BOTTOMLEFT"); guildStripe:SetWidth(3)
+    guildStripe:SetPoint("TOPLEFT"); guildStripe:SetPoint("BOTTOMLEFT"); guildStripe:SetWidth(2)
     local accent = Th.c.accent
-    guildStripe:SetColorTexture(accent[1], accent[2], accent[3], 0.9)
+    guildStripe:SetColorTexture(accent[1], accent[2], accent[3], 0.58)
 
     self.guildNameFs = Th.Fs(guildCard, "subheader", "-", "textAccent")
     self.guildNameFs:SetPoint("LEFT", 14, 6)
     self.guildSubFs = Th.Fs(guildCard, "data", "No guild data", "textDimmed")
     self.guildSubFs:SetPoint("LEFT", 14, -12)
-    self.guildSubFs:SetPoint("RIGHT", guildCard, "RIGHT", -360, -12)
+    self.guildSubFs:SetPoint("RIGHT", guildCard, "RIGHT", -120, -12)
     self.guildSubFs:SetJustifyH("LEFT")
-
-    local activityBtn = GC.UI.Button.Create(guildCard, "Activity Log", "secondary", 94, Th.btnH)
-    activityBtn:SetPoint("RIGHT", guildCard, "RIGHT", -248, 0)
-    activityBtn:SetScript("OnClick", function() self:NavigateTo("activity_all") end)
-
-    local complianceBtn = GC.UI.Button.Create(guildCard, "Compliance", "secondary", 100, Th.btnH)
-    complianceBtn:SetPoint("RIGHT", guildCard, "RIGHT", -128, 0)
-    complianceBtn:SetScript("OnClick", function() self:NavigateTo("compliance") end)
-    self.complianceBtn = complianceBtn
 
     local exportBtn = GC.UI.Button.Create(guildCard, "Export", "secondary", 74, Th.btnH)
     exportBtn:SetPoint("RIGHT", guildCard, "RIGHT", -18, 0)
@@ -643,12 +886,12 @@ function DB:Create(parent)
     local health = CreateFrame("Frame", nil, frame)
     health:SetPoint("TOPLEFT", guildCard, "BOTTOMLEFT", 0, -P)
     health:SetPoint("TOPRIGHT", guildCard, "BOTTOMRIGHT", 0, -P)
-    health:SetHeight(86)
+    health:SetHeight(112)
     Th.Bg(health, Th.c.panelAlt, Th.c.border)
     self.healthCard = health
     self.healthStripe = health:CreateTexture(nil, "ARTWORK")
-    self.healthStripe:SetPoint("TOPLEFT"); self.healthStripe:SetPoint("BOTTOMLEFT"); self.healthStripe:SetWidth(3)
-    self.healthTitle = Th.Fs(health, "subheader", "Guild Health", "textAccent")
+    self.healthStripe:SetPoint("TOPLEFT"); self.healthStripe:SetPoint("BOTTOMLEFT"); self.healthStripe:SetWidth(2)
+    self.healthTitle = Th.Fs(health, "subheader", "Guild Status", "textAccent")
     self.healthTitle:SetPoint("TOPLEFT", 14, -10)
     self.healthSummary = Th.Fs(health, "data", "", "textSecond")
     self.healthSummary:SetPoint("TOPLEFT", 14, -34)
@@ -656,30 +899,79 @@ function DB:Create(parent)
     self.healthSummary:SetJustifyH("LEFT")
     self.healthSummary:SetWordWrap(false)
 
+    self.nextActionLabel = Th.Fs(health, "tiny", "Recommended Next Step", "textDimmed")
+    self.nextActionLabel:SetPoint("TOPLEFT", health, "TOPLEFT", 456, -10)
+    self.nextActionLabel:SetPoint("TOPRIGHT", health, "TOPRIGHT", -140, -10)
+    self.nextActionLabel:SetJustifyH("LEFT")
+    self.nextActionTitle = Th.Fs(health, "data", "", "textPrimary")
+    self.nextActionTitle:SetPoint("TOPLEFT", self.nextActionLabel, "BOTTOMLEFT", 0, -4)
+    self.nextActionTitle:SetPoint("TOPRIGHT", self.nextActionLabel, "BOTTOMRIGHT", 0, -4)
+    self.nextActionTitle:SetJustifyH("LEFT")
+    self.nextActionBody = Th.Fs(health, "tiny", "", "textDimmed")
+    self.nextActionBody:SetPoint("TOPLEFT", self.nextActionTitle, "BOTTOMLEFT", 0, -4)
+    self.nextActionBody:SetPoint("TOPRIGHT", health, "TOPRIGHT", -140, -48)
+    self.nextActionBody:SetJustifyH("LEFT")
+    self.nextActionBody:SetWordWrap(false)
+    self.nextActionMeta = Th.Fs(health, "tiny", "", "textDimmed")
+    self.nextActionMeta:SetPoint("TOPLEFT", self.nextActionBody, "BOTTOMLEFT", 0, -6)
+    self.nextActionMeta:SetPoint("TOPRIGHT", health, "TOPRIGHT", -140, -70)
+    self.nextActionMeta:SetJustifyH("LEFT")
+    self.nextActionMeta:SetWordWrap(false)
+    self.nextActionMeta:Hide()
+    self.nextActionBtn = GC.UI.Button.Create(health, "Open", "primary", 110, Th.btnH)
+    self.nextActionBtn:SetPoint("TOPRIGHT", health, "TOPRIGHT", -14, -18)
+    self.nextActionBtn:SetScript("OnClick", function()
+        local action = self._recommendedAction
+        if action then
+            DB:NavigateTo(action.target, action.payload or action)
+        end
+    end)
+
     self.quickButtons = {}
-    local quickDefs = {
-        {label = "Invite Scan", target = "invite_scan", width = 86},
-        {label = "Review Unknowns", target = "roster_unknown_main_alt", width = 114},
-        {label = "Repair Alt Links", target = "relationship_repair", width = 108},
-        {label = "Compliance", target = "compliance", width = 94},
-        {label = "Ban Book", target = "ban_book", width = 82},
-        {label = "Activity", target = "activity_all", width = 78},
+
+    self.actionTilesHeader = sectionHeader(frame, "Main Actions", -(P + 52 + P + 112 + P))
+    self.actionTiles = {}
+    local actionTileDefs = {
+        {
+            key = "review",
+            label = "Needs Review",
+            meta = "Open the focused officer queue",
+            icon = "Interface\\DialogFrame\\UI-Dialog-Icon-AlertNew",
+            onClick = function() DB:ShowReviewQueue() end,
+        },
+        {
+            key = "roster",
+            label = "Roster",
+            meta = "Browse members and filters",
+            icon = "Interface\\FriendsFrame\\FriendsFrameScrollIcon",
+            target = "roster_all",
+        },
+        {
+            key = "invite",
+            label = "Invite Scan",
+            meta = "Refresh invite-ready data",
+            icon = "Interface\\Buttons\\UI-PlusButton-Up",
+            target = "invite_scan",
+        },
+        {
+            key = "messages",
+            label = "Messages",
+            meta = "Recruit and communicate",
+            icon = "Interface\\Buttons\\UI-GuildButton-PublicNote-Up",
+            onClick = function()
+                local main = GC.UI and GC.UI.MainFrame
+                if main then main:SetActivePanel("messaging") end
+            end,
+        },
     }
-    local right = -12
-    for i = #quickDefs, 1, -1 do
-        local def = quickDefs[i]
-        local btn = GC.UI.Button.Create(health, def.label, "secondary", def.width, Th.btnH)
-        btn:SetPoint("BOTTOMRIGHT", health, "BOTTOMRIGHT", right, 10)
-        right = right - def.width - 6
-        btn:SetScript("OnClick", function()
-            DB:NavigateTo(def.target)
-        end)
-        self.quickButtons[#self.quickButtons + 1] = btn
+    for _, def in ipairs(actionTileDefs) do
+        local tile = createActionTile(frame, def)
+        self.actionTiles[def.key] = tile
     end
 
     self.metricCards = {}
     self.groupHeaders = {}
-    local y = -(P + 52 + P + 86 + P)
+    local y = -(P + 52 + P + 112 + P + 24 + 112 + P)
     local cardH = 58
     for _, group in ipairs(METRIC_GROUPS) do
         self.groupHeaders[group.key] = sectionHeader(frame, group.title, y)
@@ -691,18 +983,59 @@ function DB:Create(parent)
         y = y - cardH - SECTION_GAP
     end
 
-    self.actionHeader = sectionHeader(frame, "Action Queue", y)
-    y = y - 24
-
     local actionFrame = CreateFrame("Frame", nil, frame)
-    actionFrame:SetPoint("TOPLEFT", frame, "TOPLEFT", P, y)
-    actionFrame:SetPoint("BOTTOMRIGHT", frame, "BOTTOMRIGHT", -P, P)
+    actionFrame:SetPoint("TOPLEFT", frame, "TOPLEFT", P + 18, -(P + 96))
+    actionFrame:SetPoint("TOPRIGHT", frame, "TOPRIGHT", -P - 18, -(P + 96))
+    actionFrame:SetHeight(330)
+    if GC.UI.FrameLayering then
+        GC.UI.FrameLayering:PreparePopupFrame(actionFrame, GC.UI.MainFrame and GC.UI.MainFrame.frame, 30)
+    else
+        actionFrame:SetFrameStrata("DIALOG")
+    end
     Th.Bg(actionFrame, Th.c.panelAlt, Th.c.border)
+    actionFrame:Hide()
     self.attentionFrame = actionFrame
 
+    self.actionOverlayTitle = Th.Fs(actionFrame, "subheader", "Needs Review", "textAccent")
+    self.actionOverlayTitle:SetPoint("TOPLEFT", actionFrame, "TOPLEFT", 12, -10)
+    self.actionOverlaySummary = Th.Fs(actionFrame, "small", "", "textDimmed")
+    self.actionOverlaySummary:SetPoint("LEFT", self.actionOverlayTitle, "RIGHT", 10, 0)
+    self.actionOverlaySummary:SetPoint("RIGHT", actionFrame, "RIGHT", -92, 0)
+    local actionClose = GC.UI.Button.Create(actionFrame, "Close", "secondary", 70, Th.btnH)
+    actionClose:SetPoint("TOPRIGHT", actionFrame, "TOPRIGHT", -12, -8)
+    actionClose:SetScript("OnClick", function() self:HideReviewQueue() end)
+    self.actionCloseBtn = actionClose
+
+    local repairPanel = CreateFrame("Frame", nil, actionFrame)
+    repairPanel:SetPoint("TOPLEFT", actionFrame, "TOPLEFT", 12, -42)
+    repairPanel:SetPoint("TOPRIGHT", actionFrame, "TOPRIGHT", -12, -42)
+    repairPanel:SetHeight(44)
+    Th.Bg(repairPanel, Th.c.panel, Th.c.border)
+    repairPanel:Hide()
+    self.relationshipRepairPanel = repairPanel
+
+    local repairLabel = Th.Fs(repairPanel, "small", "Relationship Cleanup", "textAccent")
+    repairLabel:SetPoint("TOPLEFT", repairPanel, "TOPLEFT", 12, -7)
+    self.relationshipRepairLabel = repairLabel
+    local repairSummary = Th.Fs(repairPanel, "tiny", "", "textSecond")
+    repairSummary:SetPoint("TOPLEFT", repairLabel, "BOTTOMLEFT", 0, -3)
+    repairSummary:SetPoint("RIGHT", repairPanel, "RIGHT", -260, 0)
+    repairSummary:SetJustifyH("LEFT")
+    self.relationshipRepairSummary = repairSummary
+
+    local repairPreviewBtn = GC.UI.Button.Create(repairPanel, "Preview", "secondary", 76, Th.btnH - 4)
+    repairPreviewBtn:SetPoint("RIGHT", repairPanel, "RIGHT", -132, 0)
+    repairPreviewBtn:SetScript("OnClick", function() self:ShowRelationshipRepairPreview() end)
+    self.relationshipRepairPreviewBtn = repairPreviewBtn
+
+    local repairApplyBtn = GC.UI.Button.Create(repairPanel, "Apply Safe", "primary", 112, Th.btnH - 4)
+    repairApplyBtn:SetPoint("RIGHT", repairPanel, "RIGHT", -12, 0)
+    repairApplyBtn:SetScript("OnClick", function() self:ApplySafeRelationshipRepairs() end)
+    self.relationshipRepairApplyBtn = repairApplyBtn
+
     local colBar = CreateFrame("Frame", nil, actionFrame)
-    colBar:SetPoint("TOPLEFT", actionFrame, "TOPLEFT", 0, 0)
-    colBar:SetPoint("TOPRIGHT", actionFrame, "TOPRIGHT", 0, 0)
+    colBar:SetPoint("TOPLEFT", actionFrame, "TOPLEFT", 0, -94)
+    colBar:SetPoint("TOPRIGHT", actionFrame, "TOPRIGHT", 0, -94)
     colBar:SetHeight(Th.colBarH)
     Th.Bg(colBar, Th.c.chrome)
     self.actionColBar = colBar
@@ -716,7 +1049,7 @@ function DB:Create(parent)
     colHdr("Suggested Action", 450, 200)
 
     local listHost = CreateFrame("Frame", nil, actionFrame)
-    listHost:SetPoint("TOPLEFT", actionFrame, "TOPLEFT", 0, -Th.colBarH)
+    listHost:SetPoint("TOPLEFT", actionFrame, "TOPLEFT", 0, -94 - Th.colBarH)
     listHost:SetPoint("BOTTOMRIGHT", actionFrame, "BOTTOMRIGHT", 0, 0)
     self.actionListHost = listHost
     self.attentionList = GC.UI.List.Create(listHost, 28, buildActionQueueRow, function(item)
@@ -732,8 +1065,9 @@ function DB:Create(parent)
             })
         end
     end)
-    self.attentionList:SetEmptyText("No action items found.")
-    self.actionEmpty = self:CreateEmptyState(actionFrame, "No action items found.", "Roster, compliance, and moderation checks are clear.")
+    self.attentionList:SetEmptyText("Nothing needs review right now.")
+    self.actionEmpty = self:CreateEmptyState(actionFrame, "Everything looks clear.", "Roster, compliance, and moderation checks are quiet.")
+    self.actionEmpty:SetInset(94 + Th.colBarH, 0)
 
     local exportOverlay = CreateFrame("Frame", nil, frame)
     exportOverlay:SetPoint("TOPLEFT", frame, "TOPLEFT", P + 18, -(P + 96))
@@ -754,28 +1088,6 @@ function DB:Create(parent)
     local exportClose = GC.UI.Button.Create(exportOverlay, "Close", "secondary", 70, Th.btnH)
     exportClose:SetPoint("TOPRIGHT", -12, -8)
     exportClose:SetScript("OnClick", function() exportOverlay:Hide() end)
-
-    local repairApply = GC.UI.Button.Create(exportOverlay, "Apply Safe Repairs", "primary", 138, Th.btnH)
-    repairApply:SetPoint("RIGHT", exportClose, "LEFT", -8, 0)
-    repairApply:Hide()
-    repairApply:SetScript("OnClick", function()
-        if not self._relationshipRepairPreview or not GC.Modules.RosterRelationships then return end
-        local result = GC.Modules.RosterRelationships:ApplyRepairPreview(self._relationshipRepairPreview)
-        self._relationshipRepairResult = result
-        local nextPreview = GC.Modules.RosterRelationships:BuildRepairPreview()
-        self._relationshipRepairPreview = nextPreview
-        if self.exportEdit then
-            self.exportEdit:SetText(buildRepairPreviewText(nextPreview, result))
-            self.exportEdit:HighlightText(0, 0)
-            self.exportEdit:SetCursorPosition(0)
-        end
-        repairApply:SetEnabled((nextPreview.summary and nextPreview.summary.safeActions or #(nextPreview.actions or {})) > 0)
-        showStatus(string.format("Safe repairs applied: %d. Manual issues remaining: %d.", result.applied or 0, nextPreview.summary and nextPreview.summary.manualReview or 0), (result.applied or 0) > 0 and "textSuccess" or "textWarn")
-        if GC.UI.RosterPanel and GC.UI.RosterPanel.Refresh then GC.UI.RosterPanel:Refresh() end
-        if GC.UI.PlayerPanel and GC.UI.PlayerPanel.Refresh then GC.UI.PlayerPanel:Refresh() end
-        if GC.UI.Dashboard and GC.UI.Dashboard.Refresh then GC.UI.Dashboard:Refresh() end
-    end)
-    self.repairApplyBtn = repairApply
 
     local exportScroll = CreateFrame("ScrollFrame", nil, exportOverlay)
     exportScroll:SetPoint("TOPLEFT", exportOverlay, "TOPLEFT", 12, -40)
@@ -840,24 +1152,59 @@ function DB:Refresh()
         or allSettings.complianceCheckMainAlt ~= false
     )
     local readiness = {
-        stats.lastScanAt and ("Last scan: " .. date("%Y-%m-%d %H:%M", stats.lastScanAt)) or "No roster scan data yet",
+        stats.lastScanAt and ("Last scan: " .. date("%Y-%m-%d %H:%M", stats.lastScanAt)) or "No roster scan yet",
         allSettings.enableRosterModule ~= false and "Tracking enabled" or "Tracking disabled",
         not hasCompliance and "Compliance checks unavailable" or complianceEnabled and "Compliance checks enabled" or "Compliance checks disabled",
         allSettings.enableSyncModule and "Sync enabled" or "Sync disabled",
     }
     if allSettings.debugMode then readiness[#readiness + 1] = "Debug mode active" end
-    self.guildSubFs:SetText(table.concat(readiness, "   |   "))
+    self.guildSubFs:SetText(table.concat(readiness, "   /   "))
 
     local health = self:BuildHealthSummary(metrics)
+    local nextAction = recommendedAction(metrics, noScan, attentionRows)
     local healthColorKey = health.state == "critical" and "danger" or health.state == "attention" and "warning" or "healthy"
     local hc = colorForState(healthColorKey)
-    self.healthStripe:SetColorTexture(hc[1], hc[2], hc[3], 0.9)
-    self.healthTitle:SetText("Guild Health: " .. health.label)
+    self.healthStripe:SetColorTexture(hc[1], hc[2], hc[3], 0.58)
+    self.healthTitle:SetText("Guild Status: " .. health.label)
     self.healthTitle:SetTextColor(hc[1], hc[2], hc[3], hc[4] or 1)
-    self.healthSummary:SetText(noScan and "No roster scan data yet. Open Roster or Invite to scan." or table.concat(health.lines, "   |   "))
+    self.healthSummary:SetText(noScan and "No roster scan yet. Open Roster or Invite when you are ready." or table.concat(health.lines, "   /   "))
+    self._recommendedAction = nextAction
+    if self.nextActionLabel then
+        self.nextActionLabel:SetText("Recommended Next Step")
+    end
+    if self.nextActionTitle then
+        local actionColor = colorForState(nextAction.state)
+        self.nextActionTitle:SetText(nextAction.title or "")
+        self.nextActionTitle:SetTextColor(actionColor[1], actionColor[2], actionColor[3], actionColor[4] or 1)
+    end
+    if self.nextActionBody then
+        self.nextActionBody:SetText(nextAction.body or "")
+    end
+    if self.nextActionMeta then
+        self.nextActionMeta:SetText("")
+        self.nextActionMeta:Hide()
+    end
+    if self.nextActionBtn then
+        self.nextActionBtn:SetLabel(nextAction.button or "Open")
+        if self.nextActionBtn.SetTooltip then
+            self.nextActionBtn:SetTooltip(
+                "Why this recommendation?",
+                string.format(
+                    "Confidence: %s\nWhy: %s\nData: %s",
+                    tostring(nextAction.confidence or "Medium"),
+                    tostring(nextAction.reason or "Current guild state suggests this action."),
+                    tostring(nextAction.dataUsed or "Dashboard metrics")
+                )
+            )
+        end
+        if self.nextActionBtn.SetVisualType then
+            self.nextActionBtn:SetVisualType(nextAction.state == "healthy" and "secondary" or "primary")
+        end
+    end
 
-    local healthH = settings.showHealth ~= false and (settings.compactMode and 64 or 86) or 0
+    local healthH = settings.showHealth ~= false and (settings.compactMode and 88 or 112) or 0
     local gap = settings.compactMode and 6 or P
+    local sectionOffset = settings.compactMode and 20 or 24
     if self.healthCard then
         self.healthCard:ClearAllPoints()
         self.healthCard:SetPoint("TOPLEFT", self.frame, "TOPLEFT", P, -(P + 52 + P))
@@ -866,56 +1213,81 @@ function DB:Refresh()
     end
 
     local y = -(P + 52 + P + healthH + gap)
-    local cardH = settings.compactMode and 48 or 58
-    local sectionOffset = settings.compactMode and 20 or 24
-    local groupGap = settings.compactMode and 6 or SECTION_GAP
-    for _, group in ipairs(METRIC_GROUPS) do
-        if self.groupHeaders and self.groupHeaders[group.key] then
-            self.groupHeaders[group.key]:ClearAllPoints()
-            self.groupHeaders[group.key]:SetPoint("TOPLEFT", self.frame, "TOPLEFT", P, y)
-        end
-        y = y - sectionOffset
-        local count = #group.items
-        local visible = {}
-        for _, def in ipairs(group.items) do
-            if not (settings.hiddenCards and settings.hiddenCards[def.key]) then
-                visible[#visible + 1] = def
-            end
-        end
-        count = #visible
-        local totalW = (self.frame:GetWidth() > 0 and self.frame:GetWidth() or 1100) - (P * 2)
-        local cardW = count > 0 and math.floor((totalW - gap * (count - 1)) / count) or totalW
-        for i, def in ipairs(visible) do
-            local card = self.metricCards[def.key]
-            if card then
-                card:ClearAllPoints()
-                card:SetPoint("TOPLEFT", self.frame, "TOPLEFT", P + (i - 1) * (cardW + gap), y)
-                card:SetSize(cardW, cardH)
-                local value = valueForMetric(def.key, metrics, metrics)
-                card._value:SetText(tostring(value or 0))
-                self:SetMetricState(card, self:GetMetricState(def.key, value))
-                if card._trend then
-                    local trend = self:GetTrend(def.key, value)
-                    card._trend:SetText(trend and trend.label or "")
-                    local trendColor = trend and trend.direction == "up" and Th.c.statusActive
-                        or trend and trend.direction == "down" and Th.c.textWarn
-                        or Th.c.textDimmed
-                    card._trend:SetTextColor(trendColor[1], trendColor[2], trendColor[3], trendColor[4] or 1)
-                end
-            end
-        end
-        y = y - cardH - groupGap
-    end
-
-    if self.actionHeader then
-        self.actionHeader:ClearAllPoints()
-        self.actionHeader:SetPoint("TOPLEFT", self.frame, "TOPLEFT", P, y)
+    if self.actionTilesHeader then
+        self.actionTilesHeader:ClearAllPoints()
+        self.actionTilesHeader:SetPoint("TOPLEFT", self.frame, "TOPLEFT", P, y)
+        self.actionTilesHeader:Show()
     end
     y = y - sectionOffset
-    if self.attentionFrame then
-        self.attentionFrame:ClearAllPoints()
-        self.attentionFrame:SetPoint("TOPLEFT", self.frame, "TOPLEFT", P, y)
-        self.attentionFrame:SetPoint("BOTTOMRIGHT", self.frame, "BOTTOMRIGHT", -P, P)
+    local tileGap = settings.compactMode and 8 or 10
+    local tileH = settings.compactMode and 86 or 104
+    local tileTotalW = (self.frame:GetWidth() > 0 and self.frame:GetWidth() or 1100) - (P * 2)
+    local tileOrder = {"review", "roster", "invite", "messages"}
+    local tileW = math.floor((tileTotalW - (tileGap * (#tileOrder - 1))) / #tileOrder)
+    for index, key in ipairs(tileOrder) do
+        local tile = self.actionTiles and self.actionTiles[key]
+        if tile then
+            tile:Show()
+            tile:ClearAllPoints()
+            tile:SetPoint("TOPLEFT", self.frame, "TOPLEFT", P + (index - 1) * (tileW + tileGap), y)
+            tile:SetSize(tileW, tileH)
+        end
+    end
+    y = y - tileH - gap
+
+    local cardH = settings.compactMode and 48 or 58
+    local groupGap = settings.compactMode and 6 or SECTION_GAP
+    for _, group in ipairs(METRIC_GROUPS) do
+        if not shouldShowMetricGroup(settings, group) then
+            if self.groupHeaders and self.groupHeaders[group.key] then
+                self.groupHeaders[group.key]:Hide()
+            end
+            for _, def in ipairs(group.items or {}) do
+                local card = self.metricCards and self.metricCards[def.key]
+                if card then card:Hide() end
+            end
+        else
+            if self.groupHeaders and self.groupHeaders[group.key] then
+                self.groupHeaders[group.key]:ClearAllPoints()
+                self.groupHeaders[group.key]:SetPoint("TOPLEFT", self.frame, "TOPLEFT", P, y)
+                self.groupHeaders[group.key]:Show()
+            end
+            y = y - sectionOffset
+            local visible = {}
+            for _, def in ipairs(group.items) do
+                if not (settings.hiddenCards and settings.hiddenCards[def.key]) then
+                    visible[#visible + 1] = def
+                elseif self.metricCards and self.metricCards[def.key] then
+                    self.metricCards[def.key]:Hide()
+                end
+            end
+            local count = #visible
+            local totalW = (self.frame:GetWidth() > 0 and self.frame:GetWidth() or 1100) - (P * 2)
+            local cardW = count > 0 and math.floor((totalW - gap * (count - 1)) / count) or totalW
+            for i, def in ipairs(visible) do
+                local card = self.metricCards[def.key]
+                if card then
+                    card:Show()
+                    card:ClearAllPoints()
+                    card:SetPoint("TOPLEFT", self.frame, "TOPLEFT", P + (i - 1) * (cardW + gap), y)
+                    card:SetSize(cardW, cardH)
+                    local value = valueForMetric(def.key, metrics, metrics)
+                    card._value:SetText(tostring(value or 0))
+                    self:SetMetricState(card, self:GetMetricState(def.key, value))
+                    if card._trend then
+                        local trend = self:GetTrend(def.key, value)
+                        card._trend:SetText(trend and trend.label or "")
+                        local trendColor = trend and trend.direction == "up" and Th.c.statusActive
+                            or trend and trend.direction == "down" and Th.c.textWarn
+                            or Th.c.textDimmed
+                        card._trend:SetTextColor(trendColor[1], trendColor[2], trendColor[3], trendColor[4] or 1)
+                    end
+                end
+            end
+            if count > 0 then
+                y = y - cardH - groupGap
+            end
+        end
     end
 
     for _, row in ipairs(attentionRows or {}) do
@@ -939,22 +1311,58 @@ function DB:Refresh()
 
     if self.attentionList then
         local hasRows = attentionRows and #attentionRows > 0
+        self._attentionRows = attentionRows or {}
         if self.actionColBar then self.actionColBar:SetShown(hasRows) end
         if self.actionListHost then self.actionListHost:SetShown(hasRows) end
+        if self.actionOverlaySummary then
+            self.actionOverlaySummary:SetText(hasRows and (tostring(#attentionRows) .. " item(s) waiting") or "No items waiting")
+        end
+        self:RefreshRelationshipRepairSummary()
         if self.actionEmpty then
             if hasRows then
                 self.actionEmpty:Hide()
             else
                 self.actionEmpty:SetMessage(
-                    noScan and "No roster scan data yet." or "No action items found.",
-                    noScan and "Open Roster or Invite to scan when needed." or "Roster, compliance, and moderation checks are clear."
+                    noScan and "No roster scan yet." or "Everything looks clear.",
+                    noScan and "Open Roster or Invite when you are ready." or "Roster, compliance, and moderation checks are quiet."
                 )
                 self.actionEmpty:Show()
                 debugLog("empty state rendered", noScan and "no scan" or "clear")
             end
         end
         self.attentionList:Refresh(hasRows and attentionRows or {})
-        self.attentionList:SetEmptyText(noScan and "No roster scan yet. Open Roster or Invite to scan when needed." or "No urgent action items. Guild looks tidy.")
+        self.attentionList:SetEmptyText(noScan and "No roster scan yet. Open Roster or Invite when you are ready." or "Nothing needs review right now.")
+        if self.attentionFrame then
+            self.attentionFrame:SetShown(self._reviewQueueOpen == true)
+        end
+    end
+
+    local reviewCount = #(attentionRows or {})
+    local reviewColor = reviewCount > 0 and Th.c.textWarn or Th.c.textSuccess
+    local repairPreview = self._relationshipRepairPreview
+    local safeRepairCount = repairPreview and repairPreview.summary and repairPreview.summary.safeActions or 0
+    local manualRepairCount = repairPreview and repairPreview.summary and repairPreview.summary.manualReview or 0
+    if self.actionTiles and self.actionTiles.review then
+        self.actionTiles.review:SetValue(tostring(reviewCount), reviewColor)
+        if safeRepairCount > 0 then
+            self.actionTiles.review:SetMeta(tostring(safeRepairCount) .. " safe cleanup(s) available")
+        elseif manualRepairCount > 0 then
+            self.actionTiles.review:SetMeta("Relationship review required")
+        else
+            self.actionTiles.review:SetMeta(reviewCount > 0 and "Open the focused officer queue" or "No review items waiting")
+        end
+    end
+    if self.actionTiles and self.actionTiles.roster then
+        self.actionTiles.roster:SetValue(tostring(metrics.total or 0), Th.c.textPrimary)
+        self.actionTiles.roster:SetMeta("Members tracked")
+    end
+    if self.actionTiles and self.actionTiles.invite then
+        self.actionTiles.invite:SetValue(noScan and "!" or tostring(metrics.recentJoins or 0), noScan and Th.c.textWarn or Th.c.textPrimary)
+        self.actionTiles.invite:SetMeta(noScan and "Run a fresh roster scan" or "Joined in the last 7 days")
+    end
+    if self.actionTiles and self.actionTiles.messages then
+        self.actionTiles.messages:SetValue("", Th.c.textPrimary)
+        self.actionTiles.messages:SetMeta("Templates and recruitment posts")
     end
 
     if GC.UI.MainFrame and GC.UI.MainFrame.promptTitle then
@@ -1005,10 +1413,6 @@ function DB:ShowRelationshipRepairPreview()
     self.exportEdit:HighlightText(0, 0)
     self.exportEdit:SetCursorPosition(0)
     self.exportEdit:SetFocus()
-    if self.repairApplyBtn then
-        self.repairApplyBtn:Show()
-        self.repairApplyBtn:SetEnabled((preview.summary and preview.summary.safeActions or #(preview.actions or {})) > 0)
-    end
     self.exportOverlay:Show()
     local safeCount = preview.summary and preview.summary.safeActions or #(preview.actions or {})
     local manualCount = preview.summary and preview.summary.manualReview or #(preview.unsafe or {})

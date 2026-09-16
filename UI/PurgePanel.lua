@@ -111,47 +111,17 @@ local function makeToggle(parent, label, x, y, onChange)
     row:SetPoint("TOPLEFT", parent, "TOPLEFT", x, y)
     row:SetSize(220, 24)
 
-    local btn = CreateFrame("Button", nil, row)
-    btn:SetSize(34, 18)
-    btn:SetPoint("LEFT", 0, 0)
-    local track = btn:CreateTexture(nil, "BACKGROUND")
-    track:SetAllPoints()
-    local knob = btn:CreateTexture(nil, "OVERLAY")
-    knob:SetSize(14, 14)
-
+    local toggle = GC.UI.Panel.Toggle(row, 36, 20, onChange)
+    toggle:SetPoint("LEFT", 0, 0)
     local text = Th.Fs(row, "data", label, "textSecond")
-    text:SetPoint("LEFT", btn, "RIGHT", 8, 0)
+    text:SetPoint("LEFT", toggle, "RIGHT", 8, 0)
 
-    local state = false
-    local function refresh()
-        knob:ClearAllPoints()
-        if state then
-            local ac = T().c.accent
-            track:SetColorTexture(ac[1] * 0.35, ac[2] * 0.35, ac[3] * 0.35, 1)
-            knob:SetColorTexture(ac[1], ac[2], ac[3], 1)
-            knob:SetPoint("RIGHT", btn, "RIGHT", -2, 0)
-        else
-            local dc = T().c.btnDisabled
-            track:SetColorTexture(dc[1], dc[2], dc[3], dc[4] or 1)
-            knob:SetColorTexture(0.45, 0.45, 0.5, 1)
-            knob:SetPoint("LEFT", btn, "LEFT", 2, 0)
-        end
-    end
-
-    btn:SetScript("OnClick", function()
-        state = not state
-        refresh()
-        if onChange then onChange(state) end
-    end)
-
-    refresh()
     return {
         set = function(value)
-            state = value and true or false
-            refresh()
+            toggle:SetChecked(value and true or false, true)
         end,
         get = function()
-            return state
+            return toggle:GetChecked()
         end,
     }
 end
@@ -203,7 +173,7 @@ function PP:Create(parent)
     local hdr = Th.Fs(frame, "header", "Purge", "textPrimary")
     hdr:SetPoint("TOPLEFT", P, -P)
 
-    local note = Th.Fs(frame, "small", "Review candidates first. GuildCore only writes /gremove macro lines; the officer must manually click GuildCore_Action.", "textWarn")
+    local note = Th.Fs(frame, "small", "Review candidates first. Guild Core prepares the removal action; you choose when to run it.", "textWarn")
     note:SetPoint("TOPLEFT", P, -(P + 28))
     note:SetPoint("TOPRIGHT", frame, "TOPRIGHT", -P, -(P + 28))
     note:SetWordWrap(true)
@@ -286,6 +256,7 @@ function PP:Create(parent)
         setStatus(PP, string.format("Rule scan complete: %d scanned, %d inactive. %d candidate%s, %d protected/skipped.", total, inactive, candidates, candidates == 1 and "" or "s", protected), "textWarn")
         PP:Refresh()
     end)
+    self.scanBtn = scanBtn
 
     local queueAllBtn = GC.UI.Button.Create(frame, "Queue Candidates", "danger", 138, Th.btnH)
     queueAllBtn:SetPoint("TOPLEFT", frame, "TOPLEFT", queueX, toolbarY)
@@ -294,6 +265,8 @@ function PP:Create(parent)
         setStatus(PP, string.format("%d purge candidate%s queued. Build and execute the macro to remove members.", queued, queued == 1 and "" or "s"), skipped > 0 and "textWarn" or "textSuccess")
         PP:Refresh()
     end)
+    if queueAllBtn.SetVisualType then queueAllBtn:SetVisualType("secondary") end
+    self.queueAllBtn = queueAllBtn
 
     local buildBtn = GC.UI.Button.Create(frame, "Build Macro", "primary", 110, Th.btnH)
     buildBtn:SetPoint("TOPLEFT", frame, "TOPLEFT", buildX, toolbarY)
@@ -302,15 +275,20 @@ function PP:Create(parent)
         setStatus(PP, message, ok and "textSuccess" or "textDanger")
         PP:Refresh()
     end)
+    buildBtn:Hide()
 
-    local executeBtn = GC.UI.Button.Create(frame, "Confirm", "success", 122, Th.btnH)
-    executeBtn:SetPoint("TOPLEFT", frame, "TOPLEFT", executeX, toolbarY)
+    local executeBtn = GC.UI.Button.Create(frame, "Prepare Removal", "primary", 138, Th.btnH)
+    executeBtn:SetPoint("TOPLEFT", frame, "TOPLEFT", buildX, toolbarY)
     executeBtn:SetScript("OnClick", function()
         local ok, message = PS():BuildMacro()
         setStatus(PP, message, ok and "textSuccess" or "textDanger")
         PP:Refresh()
     end)
     self.executeBtn = executeBtn
+
+    local toolsBtn = GC.UI.Button.Create(frame, "Tools", "secondary", 64, Th.btnH)
+    toolsBtn:SetPoint("LEFT", executeBtn, "RIGHT", 8, 0)
+    self.toolsBtn = toolsBtn
 
     local pickupBtn = GC.UI.Button.Create(frame, "Place Macro", "secondary", 104, Th.btnH)
     pickupBtn:SetPoint("TOPLEFT", frame, "TOPLEFT", pickupX, toolbarY)
@@ -329,6 +307,21 @@ function PP:Create(parent)
         setStatus(PP, "Purge queue cleared.", "textWarn")
         PP:Refresh()
     end)
+    local function layoutTools(show)
+        self.toolsOpen = show == true
+        pickupBtn:SetShown(self.toolsOpen)
+        clearBtn:SetShown(self.toolsOpen)
+        if self.toolsOpen then
+            pickupBtn:ClearAllPoints()
+            pickupBtn:SetPoint("LEFT", toolsBtn, "RIGHT", 8, 0)
+            clearBtn:ClearAllPoints()
+            clearBtn:SetPoint("LEFT", pickupBtn, "RIGHT", 8, 0)
+        end
+        toolsBtn:SetLabel(self.toolsOpen and "Hide" or "Tools")
+        if toolsBtn.SetActive then toolsBtn:SetActive(self.toolsOpen) end
+    end
+    toolsBtn:SetScript("OnClick", function() layoutTools(not self.toolsOpen) end)
+    layoutTools(false)
 
     local topY = toolbarY - 58
     local colW = math.floor((frame:GetWidth() > 0 and frame:GetWidth() or 1000) / 3) - P
@@ -345,11 +338,11 @@ function PP:Create(parent)
         setStatus(PP, message, ok and "textWarn" or "textDanger")
         PP:Refresh()
     end)
-    self.candidatesList:SetEmptyText("Run a rule scan to find candidates.")
+    self.candidatesList:SetEmptyText("Run a rule scan to find purge candidates.")
 
     local protectedFrame = section(frame, "PROTECTED / SKIPPED", P + colW + P, topY, colW, listH)
     self.protectedList = GC.UI.List.Create(protectedFrame, 26, buildPurgeRow)
-    self.protectedList:SetEmptyText("Protected members appear here.")
+    self.protectedList:SetEmptyText("Protected and skipped members will appear here.")
 
     local queueFrame = section(frame, "QUEUED PURGES", P + (colW + P) * 2, topY, colW, listH)
     self.queueList = GC.UI.List.Create(queueFrame, 26, buildPurgeRow, nil, function(item)
@@ -410,6 +403,9 @@ function PP:Refresh()
         end
     end
     local candidates = PS():GetCandidates()
+    if self.queueAllBtn then
+        self.queueAllBtn:SetEnabled(#candidates > 0)
+    end
     if self.candidatesCountLabel then
         local count = #candidates
         self.candidatesCountLabel:SetText(string.format("%d to purge", count))

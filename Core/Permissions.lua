@@ -49,6 +49,37 @@ function GC.Permissions:CanInviteGuild()
     return false, "No guild invite API is available."
 end
 
+function GC.Permissions:CanSendMessageChannel(channelKey)
+    channelKey = tostring(channelKey or "GUILD"):upper()
+    if channelKey == "INSTANCE" then
+        channelKey = "INSTANCE_CHAT"
+    end
+
+    if channelKey == "GUILD" then
+        if GC.API and GC.API.CanSpeakInGuildChat and not GC.API.CanSpeakInGuildChat() then
+            return false, "Your current guild permissions do not allow guild chat."
+        end
+        return true
+    end
+
+    if channelKey == "OFFICER" then
+        if not self:IsOfficerOrBetter() then
+            return false, "Officer rank required for officer messages."
+        end
+        return true
+    end
+
+    local settings = GC.DB and GC.DB.GetSettings and GC.DB:GetSettings() or {}
+    local dangerRestricted = not settings or settings.restrictDangerActions ~= false
+    if dangerRestricted and (channelKey == "YELL" or channelKey == "RAID" or channelKey == "INSTANCE_CHAT") then
+        if not self:IsOfficerOrBetter() then
+            return false, "Officer rank required for high-impact message channels."
+        end
+    end
+
+    return true
+end
+
 function GC.Permissions:CanManageRankIndex(targetRankIndex)
     if not self:IsOfficerOrBetter() then
         return false, "Officer rank required."

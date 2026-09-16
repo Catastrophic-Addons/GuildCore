@@ -32,6 +32,7 @@ local function normalizeTargetChannel(channelId)
         PARTY = true,
         RAID = true,
         INSTANCE_CHAT = true,
+        CHANNEL = true,
     }
     return supported[channelId] and channelId or "GUILD"
 end
@@ -108,6 +109,8 @@ local function ensureMessagesState(guild)
             message.notes = tostring(message.notes or "")
             message.body = tostring(message.body or "")
             message.targetChannel = normalizeTargetChannel(message.targetChannel)
+            local channelName = trim(message.targetChannelName or "")
+            message.targetChannelName = channelName ~= "" and channelName or nil
             if type(message.tags) ~= "table" then
                 message.tags = {}
             end
@@ -548,6 +551,20 @@ function GC.Migrations:Run()
         ensureSyncSettings(root)
         ensureRosterSettings(root)
         currentVersion = 21
+    end
+
+    if currentVersion < 22 then
+        root.settings = root.settings or {}
+        if root.settings.welcomeIndividualDelaySeconds == nil then
+            root.settings.welcomeIndividualDelaySeconds = 3
+        end
+        if root.settings.welcomeMessageChannel == nil then
+            root.settings.welcomeMessageChannel = "GUILD"
+        end
+        if root.settings.welcomeMessageTemplate == "Welcome to the guild, {names}! Glad to have you aboard!" then
+            root.settings.welcomeMessageTemplate = "Welcome to the guild, {name}! Glad to have you with us!"
+        end
+        currentVersion = 22
     end
 
     for _, guild in pairs(root.guilds or {}) do

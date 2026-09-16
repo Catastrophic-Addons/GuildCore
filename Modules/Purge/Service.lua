@@ -36,6 +36,12 @@ local function getHotkey()
     return settings and settings.guildActionHotkey or DEFAULT_HOTKEY
 end
 
+local function refreshPreparedActionStatus()
+    if GC.UI and GC.UI.MainFrame and GC.UI.MainFrame.RefreshPreparedActionStatus then
+        GC.UI.MainFrame:RefreshPreparedActionStatus()
+    end
+end
+
 local function trim(value)
     return GC.Utils.Trim(value or "")
 end
@@ -252,7 +258,7 @@ local function iterRosterCandidates()
         GC.API.SetGuildRosterShowOffline(true)
         GC.API.GuildRoster()
 
-        local totalMembers = GetNumGuildMembers and GetNumGuildMembers() or 0
+        local totalMembers = GC.API and GC.API.GetNumGuildMembers and GC.API.GetNumGuildMembers() or 0
         for index = 1, totalMembers do
             local fullName, rankName, rankIndex, level, classDisplayName, zone, publicNote, officerNote, isOnline, status, classFileName = GC.API.GetGuildRosterInfo(index)
             if fullName then
@@ -532,6 +538,7 @@ function PurgeService:ClearQueue()
         GC.State.actionMacroOwner = nil
     end
     clearMacro()
+    refreshPreparedActionStatus()
 end
 
 function PurgeService:ScanCandidates(options)
@@ -706,6 +713,7 @@ function PurgeService:BuildMacro()
     GC:Debug("purge macro body before execution:")
     GC:Debug(macroText)
     GC:Debug("purge bound hotkey", tostring(hotkey))
+    refreshPreparedActionStatus()
     return true, string.format("Press %s 1 time to complete all actions. Batch size: %d.", hotkey, #preparedNames)
 end
 
@@ -789,6 +797,7 @@ function PurgeService:CaptureSystemMessage(message)
     if GC.UI and GC.UI.PurgePanel and GC.UI.PurgePanel.Refresh then
         GC.UI.PurgePanel:Refresh()
     end
+    refreshPreparedActionStatus()
 end
 
 function PurgeService:OnRosterUpdated()

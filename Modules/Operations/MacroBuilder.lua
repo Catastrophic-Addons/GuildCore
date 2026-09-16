@@ -14,6 +14,7 @@ local MacroBuilderInstance
 local MACRO_NAME = "GuildCore_Action"
 local MACRO_ICON = "INV_Misc_Note_01"
 local MACRO_LIMIT = 255
+local RESET_LINE = "/run GuildCore_ResetActionMacro()"
 local DEFAULT_HOTKEY = "CTRL-SHIFT-K"
 
 local function debugPrint(...)
@@ -97,6 +98,13 @@ local function getMacroBody()
     return GetMacroBody(MACRO_NAME)
 end
 
+local function clearMacro()
+    local index = getMacroIndex()
+    if index and EditMacro then
+        EditMacro(index, MACRO_NAME, MACRO_ICON, "")
+    end
+end
+
 local function debugList(label, list)
     local parts = {}
     for i = 1, #(list or {}) do
@@ -120,6 +128,12 @@ local function canCreateMacro()
         accountMacros = accountMacros.global or accountMacros.numGlobalMacros or 0
     end
     return (accountMacros or 0) < (MAX_ACCOUNT_MACROS or 120)
+end
+
+local function refreshPreparedActionStatus()
+    if GC.UI and GC.UI.MainFrame and GC.UI.MainFrame.RefreshPreparedActionStatus then
+        GC.UI.MainFrame:RefreshPreparedActionStatus()
+    end
 end
 
 local function expandedLines(queue)
@@ -186,6 +200,8 @@ function MacroBuilder:ClearPreparedMacro()
     if GC.State.actionMacroOwner == "operations" then
         GC.State.actionMacroOwner = nil
     end
+    clearMacro()
+    refreshPreparedActionStatus()
 end
 
 function MacroBuilder:ClearQueue()
@@ -249,6 +265,11 @@ function MacroBuilder:BuildMacro()
         return false, "The first queued action is too long for a WoW macro."
     end
 
+    local withReset = macroText .. "\n" .. RESET_LINE
+    if #withReset <= MACRO_LIMIT then
+        macroText = withReset
+    end
+
     local index = getMacroIndex()
     if index then
         EditMacro(index, MACRO_NAME, MACRO_ICON, macroText)
@@ -274,6 +295,7 @@ function MacroBuilder:BuildMacro()
     debugPrint("bound hotkey", tostring(hotkey))
     debugList("prepared lines", self.preparedLines)
     debugList("queue after build", self.queue)
+    refreshPreparedActionStatus()
     return true, string.format("Press %s 1 time to complete all actions.", hotkey)
 end
 
@@ -453,6 +475,7 @@ function MacroBuilder:CaptureSystemMessage(message)
             elseif #self.awaitingConfirmation == 0 and self:GetQueuedLineCount() == 0 then
                 self:ClearPreparedMacro()
             end
+            refreshPreparedActionStatus()
         end
         if GC.UI and GC.UI.PlayerPanel and GC.UI.PlayerPanel.SetActionFeedback then
             GC.UI.PlayerPanel:SetActionFeedback(message, "textSuccess")

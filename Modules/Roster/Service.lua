@@ -37,16 +37,23 @@ function RosterService:RunScan(reason)
     end
 
     if scanSummary then
-        GC:Debug(string.format(
-            "Scan %s: tracked=%d online=%d excluded=%d changes=%d pendingPrompts=%d%s",
-            tostring(scanSummary.reason or reason or "scan"),
-            tonumber(scanSummary.trackedMembers or 0),
-            tonumber(scanSummary.trackedOnline or 0),
-            tonumber(scanSummary.excludedMembers or 0),
-            tonumber(scanSummary.changes or 0),
-            tonumber(scanSummary.pendingPrompts or 0),
-            snapshot.usedRankFallback and " fallback=all-ranks" or ""
-        ))
+        local changeCount = tonumber(scanSummary.changes or 0)
+        local pendingPromptCount = tonumber(scanSummary.pendingPrompts or 0)
+
+        if changeCount > 0 then
+            GC:Debug(string.format(
+                "Scan %s: tracked=%d online=%d excluded=%d changes=%d pendingPrompts=%d%s",
+                tostring(scanSummary.reason or reason or "scan"),
+                tonumber(scanSummary.trackedMembers or 0),
+                tonumber(scanSummary.trackedOnline or 0),
+                tonumber(scanSummary.excludedMembers or 0),
+                changeCount,
+                pendingPromptCount,
+                snapshot.usedRankFallback and " fallback=all-ranks" or ""
+            ))
+        elseif snapshot.usedRankFallback == true then
+            GC:Debug("Roster scan used all ranks because the configured rank filter was unavailable.")
+        end
     end
 
     -- Refresh the open UI panel if the main frame is visible.

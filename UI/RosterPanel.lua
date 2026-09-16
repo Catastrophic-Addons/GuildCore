@@ -472,7 +472,7 @@ function RP:Create(parent)
         end)
     end
     hint:SetTextColor(0.4, 0.4, 0.5, 1)
-    hint:SetText("Search name, rank, class…")
+    hint:SetText("Search members...")
     hint:SetPoint("LEFT", searchBox, "LEFT", 6, 0)   -- match Panel.Input text insets
     hint:SetPoint("RIGHT", searchBox, "RIGHT", -6, 0)
     searchBox:SetScript("OnTextChanged", function(eb)
@@ -521,7 +521,7 @@ function RP:Create(parent)
         local ok, err = GC.Services.GuildService:TriggerScan()
         local mf = GC.UI.MainFrame
         if mf then
-            mf:SetStatus(ok and "Roster scan requested…" or (err or "Unable to scan."), ok and "textWarn" or "textDanger")
+            mf:SetStatus(ok and "Roster scan requested." or (err or "Unable to scan."), ok and "textWarn" or "textDanger")
         end
     end)
 
@@ -670,14 +670,19 @@ function RP:_refreshFilterControls()
     local filters = self.filters or {}
     if self.onlineBtn then
         self.onlineBtn:SetLabel(filters.onlineOnly and "Show All" or "Online Only")
+        if self.onlineBtn.SetActive then self.onlineBtn:SetActive(filters.onlineOnly == true) end
     end
     if self.groupBtn then
         self.groupBtn:SetLabel(filters.groupAlts and "Ungroup" or "Group Alts")
+        if self.groupBtn.SetActive then self.groupBtn:SetActive(filters.groupAlts == true) end
     end
     if self.alphaButtons then
         local Th = T()
         for label, btn in pairs(self.alphaButtons) do
             local active = (label == "All" and not filters.letter) or label == filters.letter
+            if btn.SetActive then
+                btn:SetActive(active)
+            end
             if btn.SetButtonState then
                 btn:SetButtonState(active and "PUSHED" or "NORMAL")
             end

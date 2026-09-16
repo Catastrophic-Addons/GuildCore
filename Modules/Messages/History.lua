@@ -44,6 +44,7 @@ function I:AddHistoryEntry(entry)
         -- NormalizeTargetChannel is added by Service.lua, resolved at call time
         target     = self:NormalizeTargetChannel(entry.target or "GUILD"),
         recipient  = trim(entry.recipient) ~= "" and trim(entry.recipient) or nil,
+        publicChannel = trim(entry.publicChannel) ~= "" and trim(entry.publicChannel) or nil,
         sentBy     = entry.sentBy or currentPlayerName() or "Unknown",
         sentAt     = tonumber(entry.sentAt) or now(),
         chunkCount = math.max(1, math.floor(tonumber(entry.chunkCount) or 1)),
@@ -75,6 +76,7 @@ function I:ListHistory(limit)
                 title      = entry.title,
                 target     = entry.target or "GUILD",
                 recipient  = entry.recipient,
+                publicChannel = entry.publicChannel,
                 sentBy     = entry.sentBy,
                 sentAt     = entry.sentAt,
                 sentLabel  = entry.sentAt and date("%m-%d %H:%M", entry.sentAt) or "",

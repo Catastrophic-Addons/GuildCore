@@ -49,6 +49,79 @@ function OperationsService:GetActionAvailability(player)
     }
 end
 
+local function currentActorRankIndex()
+    return GC.Permissions and GC.Permissions.GetPlayerGuildRankIndex and GC.Permissions:GetPlayerGuildRankIndex() or nil
+end
+
+local function observedGuildRankOptions()
+    local byIndex = {}
+    local players = GC.Services and GC.Services.DataStore and GC.Services.DataStore:GetPlayers() or {}
+    for _, player in pairs(players or {}) do
+        local index = tonumber(player and player.rankIndex)
+        if index then
+            byIndex[index] = byIndex[index] or {
+                index = index,
+                name = player.rankName or ("Rank " .. tostring(index)),
+            }
+            if player.rankName and player.rankName ~= "" then
+                byIndex[index].name = player.rankName
+            end
+        end
+    end
+
+    local totalRanks = GetNumGuildRanks and tonumber(GetNumGuildRanks()) or nil
+    if totalRanks and totalRanks > 0 then
+        for index = 0, totalRanks - 1 do
+            byIndex[index] = byIndex[index] or {
+                index = index,
+                name = "Rank " .. tostring(index),
+            }
+        end
+    end
+
+    local rows = {}
+    for _, row in pairs(byIndex) do
+        rows[#rows + 1] = row
+    end
+    table.sort(rows, function(a, b) return (a.index or 99) < (b.index or 99) end)
+    return rows
+end
+
+function OperationsService:GetTargetRankOptions(player)
+    local currentRankIndex = tonumber(player and player.rankIndex)
+    local actorRankIndex = tonumber(currentActorRankIndex())
+    local rows = {}
+
+    for _, rank in ipairs(observedGuildRankOptions()) do
+        local targetIndex = tonumber(rank.index)
+        if targetIndex and currentRankIndex and targetIndex ~= currentRankIndex then
+            local direction = targetIndex < currentRankIndex and "promote" or "demote"
+            local enabled = true
+            local reason
+
+            if actorRankIndex and targetIndex <= actorRankIndex then
+                enabled = false
+                reason = "Target rank would be at or above your rank."
+            elseif direction == "promote" then
+                enabled, reason = GC.Permissions:CanPromoteRankIndex(currentRankIndex)
+            else
+                enabled, reason = GC.Permissions:CanDemoteRankIndex(currentRankIndex)
+            end
+
+            rows[#rows + 1] = {
+                index = targetIndex,
+                name = rank.name or ("Rank " .. tostring(targetIndex)),
+                direction = direction,
+                jumps = math.abs(targetIndex - currentRankIndex),
+                enabled = enabled == true,
+                reason = reason,
+            }
+        end
+    end
+
+    return rows
+end
+
 local function targetName(player)
     if not player then
         return nil
@@ -105,7 +178,7 @@ local function findRosterGuid(player)
         return directGuid
     end
 
-    if not GetNumGuildMembers then
+    if not (GC.API and GC.API.GetNumGuildMembers) then
         return nil
     end
 
@@ -114,7 +187,7 @@ local function findRosterGuid(player)
         return nil
     end
 
-    for index = 1, GetNumGuildMembers() do
+    for index = 1, GC.API.GetNumGuildMembers() do
         if C_GuildInfo and C_GuildInfo.GetGuildRosterInfo then
             local info = C_GuildInfo.GetGuildRosterInfo(index)
             if type(info) == "table" then
@@ -129,10 +202,10 @@ local function findRosterGuid(player)
             end
         end
 
-        if GetGuildRosterInfo then
-            local fullName, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, guid = GetGuildRosterInfo(index)
+        if GC.API and GC.API.GetGuildRosterInfo then
+            local fullName, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, guid = GC.API.GetGuildRosterInfo(index)
             if normalizeNameForCompare(fullName) == target then
-                debugRankOrder("legacy GetGuildRosterInfo match:", tostring(index), tostring(fullName), "guid:", tostring(guid))
+                debugRankOrder("GetGuildRosterInfo match:", tostring(index), tostring(fullName), "guid:", tostring(guid))
                 if guid and guid ~= "" then
                     return guid
                 end
@@ -243,6 +316,56 @@ function OperationsService:Demote(player)
 
     -- See Promote(): /gdemote has to be executed by a user-clicked macro.
     return GC.Services.OperationsMacro:QueueRankAction(player, "/gdemote", 1)
+end
+
+function OperationsService:PrepareRankChange(player, targetRankIndex)
+    if not player then
+        return false, "No player selected."
+    end
+
+    local currentRankIndex = tonumber(player.rankIndex)
+    targetRankIndex = tonumber(targetRankIndex)
+    if not currentRankIndex or not targetRankIndex then
+        return false, "Rank data unavailable."
+    end
+    if targetRankIndex == currentRankIndex then
+        return false, "Choose a different target rank."
+    end
+
+    local command = targetRankIndex < currentRankIndex and "/gpromote" or "/gdemote"
+    local action = command == "/gpromote" and "promote" or "demote"
+    local options = self:GetTargetRankOptions(player)
+    local selected
+    for _, option in ipairs(options or {}) do
+        if tonumber(option.index) == targetRankIndex then
+            selected = option
+            break
+        end
+    end
+    if not selected then
+        return false, "Target rank is unavailable."
+    end
+    if not selected.enabled then
+        return false, selected.reason or "Target rank is not allowed."
+    end
+
+    local macro = GC.Services and GC.Services.OperationsMacro
+    if not macro then
+        return false, "Guild action macro service is unavailable."
+    end
+
+    macro:ClearQueue()
+    local ok, message = macro:QueueRankAction(player, command, selected.jumps)
+    if not ok then
+        return false, message
+    end
+
+    return true, string.format(
+        "%s to %s prepared. %s",
+        action == "promote" and "Promotion" or "Demotion",
+        tostring(selected.name),
+        tostring(message or "Use the guild action hotkey to execute.")
+    )
 end
 
 function OperationsService:Kick(player)

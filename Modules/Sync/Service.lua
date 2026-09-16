@@ -84,13 +84,13 @@ end
 
 local function senderInGuild(peerName)
     if not peerName or peerName == "" then return false end
-    if not GetNumGuildMembers or not GetGuildRosterInfo then
+    if not (GC.API and GC.API.GetNumGuildMembers and GC.API.GetGuildRosterInfo) then
         return IsInGuild and IsInGuild() or false
     end
     local target = peerName:lower()
-    local count = GetNumGuildMembers() or 0
+    local count = GC.API.GetNumGuildMembers() or 0
     for index = 1, count do
-        local fullName = GetGuildRosterInfo(index)
+        local fullName = GC.API.GetGuildRosterInfo(index)
         if normalizeSender(fullName):lower() == target then
             return true
         end
@@ -99,13 +99,13 @@ local function senderInGuild(peerName)
 end
 
 local function guildRankIndex(peerName)
-    if not peerName or peerName == "" or not GetNumGuildMembers or not GetGuildRosterInfo then
+    if not peerName or peerName == "" or not (GC.API and GC.API.GetNumGuildMembers and GC.API.GetGuildRosterInfo) then
         return nil
     end
     local target = peerName:lower()
-    local count = GetNumGuildMembers() or 0
+    local count = GC.API.GetNumGuildMembers() or 0
     for index = 1, count do
-        local fullName, _, rankIndex = GetGuildRosterInfo(index)
+        local fullName, _, rankIndex = GC.API.GetGuildRosterInfo(index)
         if normalizeSender(fullName):lower() == target then
             return tonumber(rankIndex)
         end

@@ -43,16 +43,16 @@ function Panel.Section(parent, title, h)
 
     -- Accent left-edge bar
     local accent = frame:CreateTexture(nil, "ARTWORK")
-    accent:SetPoint("TOPLEFT"); accent:SetPoint("BOTTOMLEFT"); accent:SetWidth(2)
+    accent:SetPoint("TOPLEFT"); accent:SetPoint("BOTTOMLEFT"); accent:SetWidth(1)
     local a = Th.c.accent
-    accent:SetColorTexture(a[1], a[2], a[3], 0.8)
+    accent:SetColorTexture(a[1], a[2], a[3], 0.48)
 
     -- Title text
     local lbl = Th.Fs(frame, "subheader", title, "textAccent")
     lbl:SetPoint("TOPLEFT", P, -7)
 
     -- Separator
-    Th.HSep(frame, -28)
+    Th.HSep(frame, -28, 0.55)
 
     -- Inner content frame
     local content = CreateFrame("Frame", nil, frame)
@@ -74,7 +74,7 @@ function Panel.Input(parent, w, h)
     local eb = CreateFrame("EditBox", nil, parent)
     if GC.Perf then
         GC.Perf:CountUI("inputs", 1)
-        GC.Perf:CountUI("textures", 5)
+        GC.Perf:CountUI("textures", 9)
     end
     eb:SetSize(w, h)
     eb:SetAutoFocus(false)
@@ -90,44 +90,108 @@ function Panel.Input(parent, w, h)
     local pc = Th.c.textPrimary
     eb:SetTextColor(pc[1], pc[2], pc[3], pc[4])
 
-    -- Background
-    local bg = eb:CreateTexture(nil, "BACKGROUND", nil, -8)
-    bg:SetAllPoints()
     local ic = Th.c.panelAlt
-    bg:SetColorTexture(ic[1], ic[2], ic[3], ic[4])
+    local bc = Th.c.borderStrong
+    local surface = Th.RoundedSurface(eb, ic, bc, 6, "BACKGROUND", -8)
+    eb._surface = surface
 
-    -- Border
-    local function edgeTex(sublevel)
-        local e = eb:CreateTexture(nil, "BACKGROUND", nil, sublevel)
-        local bc = Th.c.borderStrong
-        e:SetColorTexture(bc[1], bc[2], bc[3], bc[4])
-        return e
+    local function draw(focused)
+        local Th2 = T()
+        local fill = Th2.c.panelAlt
+        local edge = focused and Th2.c.borderAccent or Th2.c.borderStrong
+        surface:SetColorTexture(fill[1], fill[2], fill[3], fill[4] or 1)
+        surface:SetBorderColor(edge[1], edge[2], edge[3], focused and 0.9 or 0.72)
+        local text = Th2.c.textPrimary
+        eb:SetTextColor(text[1], text[2], text[3], text[4] or 1)
     end
-    local top, bot, lft, rgt = edgeTex(-7), edgeTex(-7), edgeTex(-7), edgeTex(-7)
-    top:SetPoint("TOPLEFT"); top:SetPoint("TOPRIGHT"); top:SetHeight(1)
-    bot:SetPoint("BOTTOMLEFT"); bot:SetPoint("BOTTOMRIGHT"); bot:SetHeight(1)
-    lft:SetPoint("TOPLEFT"); lft:SetPoint("BOTTOMLEFT"); lft:SetWidth(1)
-    rgt:SetPoint("TOPRIGHT"); rgt:SetPoint("BOTTOMRIGHT"); rgt:SetWidth(1)
 
     -- Focused highlight
-    eb:SetScript("OnEditFocusGained", function()
-        local ac = Th.c.borderAccent
-        top:SetColorTexture(ac[1], ac[2], ac[3], ac[4])
-        bot:SetColorTexture(ac[1], ac[2], ac[3], ac[4])
-        lft:SetColorTexture(ac[1], ac[2], ac[3], ac[4])
-        rgt:SetColorTexture(ac[1], ac[2], ac[3], ac[4])
+    eb:HookScript("OnEditFocusGained", function()
+        draw(true)
     end)
-    eb:SetScript("OnEditFocusLost", function()
-        local bc = Th.c.borderStrong
-        top:SetColorTexture(bc[1], bc[2], bc[3], bc[4])
-        bot:SetColorTexture(bc[1], bc[2], bc[3], bc[4])
-        lft:SetColorTexture(bc[1], bc[2], bc[3], bc[4])
-        rgt:SetColorTexture(bc[1], bc[2], bc[3], bc[4])
+    eb:HookScript("OnEditFocusLost", function()
+        draw(false)
     end)
 
     eb:SetScript("OnEscapePressed", function(self) self:ClearFocus() end)
 
+    if Th.RegisterRefresh then
+        Th:RegisterRefresh(function() draw(eb:HasFocus()) end)
+    end
+    draw(false)
+
     return eb
+end
+
+-- Compact switch control used by settings and workflow filters.
+-- Returns a Button frame with :SetChecked(value, silent), :GetChecked(),
+-- :SetEnabled(value), and :SetOnChange(callback).
+function Panel.Toggle(parent, w, h, onChange)
+    local Th = T()
+    local switch = CreateFrame("Button", nil, parent)
+    if GC.Perf then
+        GC.Perf:CountUI("buttons", 1)
+        GC.Perf:CountUI("textures", 3)
+    end
+    switch:SetSize(w or 46, h or 22)
+
+    local controlH = h or 22
+    local track = Th.RoundedSurface(switch, Th.c.btnDisabled, Th.c.border, math.floor(controlH / 2), "BACKGROUND", -8)
+    local knob = CreateFrame("Frame", nil, switch)
+    knob:SetSize(math.max(10, controlH - 6), math.max(10, controlH - 6))
+    local knobSurface = Th.RoundedSurface(knob, Th.c.textDimmed, nil, math.floor((controlH - 6) / 2), "OVERLAY", 1)
+
+    local checked = false
+    local enabled = true
+    local changeCallback = onChange
+
+    local function draw()
+        local Th2 = T()
+        local trackColor = checked and Th2.c.accentMid or Th2.c.btnDisabled
+        local knobColor = checked and Th2.c.textPrimary or Th2.c.textDimmed
+
+        track:SetColorTexture(trackColor[1], trackColor[2], trackColor[3], checked and 0.55 or 1)
+        local border = Th2.c.border
+        track:SetBorderColor(border[1], border[2], border[3], 0.5)
+        knobSurface:SetColorTexture(knobColor[1], knobColor[2], knobColor[3], enabled and 1 or 0.45)
+        knob:ClearAllPoints()
+        knob:SetPoint(checked and "RIGHT" or "LEFT", switch, checked and "RIGHT" or "LEFT", checked and -2 or 2, 0)
+        switch:SetAlpha(enabled and 1 or 0.55)
+    end
+
+    switch:SetScript("OnClick", function()
+        if not enabled then return end
+        checked = not checked
+        draw()
+        if changeCallback then changeCallback(checked) end
+    end)
+
+    function switch:SetChecked(value, silent)
+        checked = value and true or false
+        draw()
+        if not silent and changeCallback then changeCallback(checked) end
+    end
+
+    function switch:GetChecked()
+        return checked
+    end
+
+    function switch:SetEnabled(value)
+        enabled = value and true or false
+        self:EnableMouse(enabled)
+        draw()
+    end
+
+    function switch:SetOnChange(callback)
+        changeCallback = callback
+    end
+
+    if Th.RegisterRefresh then
+        Th:RegisterRefresh(draw)
+    end
+
+    draw()
+    return switch
 end
 
 -- Stat tile: a compact panel showing a number + label. Used in the dashboard.
@@ -142,7 +206,7 @@ function Panel.StatTile(parent, label, value)
     local stripe = f:CreateTexture(nil, "ARTWORK")
     stripe:SetPoint("TOPLEFT"); stripe:SetPoint("TOPRIGHT"); stripe:SetHeight(2)
     local a = Th.c.accent
-    stripe:SetColorTexture(a[1], a[2], a[3], 0.7)
+    stripe:SetColorTexture(a[1], a[2], a[3], 0.42)
 
     local numFs = Th.Fs(f, "dataLarge", tostring(value or 0), "textPrimary")
     numFs:SetPoint("CENTER", 0, 8)

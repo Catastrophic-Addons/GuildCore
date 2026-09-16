@@ -1,5 +1,5 @@
 -- Modules/WelcomeBatch/Service.lua
--- Batches newly joined guild members into one warm guild chat welcome.
+-- Sends one warm guild-chat welcome for each newly joined member.
 local addonName, ns = ...
 local GC = ns.GuildCore
 
@@ -68,18 +68,6 @@ local JOIN_PATTERNS = {
     "^(.+) has joined the guild%.$",
 }
 
-local function formatNames(names)
-    if #names == 0 then return "" end
-    if #names == 1 then return names[1] end
-    if #names == 2 then return names[1] .. " and " .. names[2] end
-
-    local parts = {}
-    for index = 1, #names - 1 do
-        parts[#parts + 1] = names[index]
-    end
-    return table.concat(parts, ", ") .. ", and " .. names[#names]
-end
-
 local function debugLog(...)
     if GC.Debug then
         GC:Debug("WelcomeBatch:", ...)
@@ -102,7 +90,7 @@ function WB:IsEnabled()
 end
 
 function WB:GetWindowSeconds()
-    return math.max(15, math.floor(tonumber(settings().welcomeBatchWindowSeconds) or 180))
+    return math.max(1, math.floor(tonumber(settings().welcomeIndividualDelaySeconds) or 3))
 end
 
 -- Keep only recent sent keys so the saved duplicate guard stays small.
@@ -134,7 +122,7 @@ end
 -- Read WoW's current guild roster without forcing a fresh GuildRoster() call.
 function WB:BuildRosterSnapshot()
     local roster = {}
-    local total = GC.API and GC.API.GetNumGuildMembers and GC.API.GetNumGuildMembers() or (GetNumGuildMembers and GetNumGuildMembers()) or 0
+    local total = GC.API and GC.API.GetNumGuildMembers and GC.API.GetNumGuildMembers() or 0
 
     for index = 1, tonumber(total) or 0 do
         local fullName = GC.API and GC.API.GetGuildRosterInfo and GC.API.GetGuildRosterInfo(index) or nil
@@ -233,6 +221,7 @@ function WB:QueueJoin(name, source)
     local entry = {
         key = key,
         name = displayName(name),
+        target = key,
         source = source or "unknown",
         queuedAt = now(),
     }
@@ -243,8 +232,8 @@ function WB:QueueJoin(name, source)
     return true
 end
 
--- The timer starts with the first queued member, then sends the whole batch at
--- the end of the configured window. Later joins join the same pending batch.
+-- A short delay lets the roster settle before sending. Additional joins remain
+-- queued and are welcomed individually at the same paced interval.
 function WB:StartTimer()
     if self.timer then
         debugLog("batch timer already running")
@@ -252,24 +241,31 @@ function WB:StartTimer()
     end
 
     local delay = self:GetWindowSeconds()
-    debugLog("batch timer started", tostring(delay) .. "s")
+    debugLog("individual welcome timer started", tostring(delay) .. "s")
     self.timer = C_Timer.NewTimer(delay, function()
         self.timer = nil
-        self:SendBatch()
+        self:SendNext()
     end)
 end
 
-function WB:BuildMessage(namesText)
+function WB:BuildMessage(memberName)
     local template = trim(settings().welcomeMessageTemplate)
     if template == "" then
-        template = "Welcome to the guild, {names}! Glad to have you aboard!"
+        template = "Welcome to the guild, {name}! Glad to have you with us!"
     end
 
+    local replaced = false
+    if template:find("{name}", 1, true) then
+        template = template:gsub("{name}", memberName)
+        replaced = true
+    end
+    -- Preserve existing saved templates from the previous batched welcome.
     if template:find("{names}", 1, true) then
-        return (template:gsub("{names}", namesText))
+        template = template:gsub("{names}", memberName)
+        replaced = true
     end
 
-    return template .. " " .. namesText
+    return replaced and template or (template .. " " .. memberName)
 end
 
 function WB:CanSend()
@@ -282,7 +278,8 @@ function WB:CanSend()
     if not IsInGuild or not IsInGuild() then
         return false, "not in guild"
     end
-    if GC.API and GC.API.CanSpeakInGuildChat and not GC.API.CanSpeakInGuildChat() then
+    if settings().welcomeMessageChannel ~= "WHISPER"
+        and GC.API and GC.API.CanSpeakInGuildChat and not GC.API.CanSpeakInGuildChat() then
         return false, "no guild chat permission"
     end
     if InCombatLockdown and InCombatLockdown() then
@@ -297,12 +294,12 @@ function WB:RescheduleAfterSkip(reason)
         debugLog("rescheduling welcome batch after combat skip")
         self.timer = C_Timer.NewTimer(15, function()
             self.timer = nil
-            self:SendBatch()
+            self:SendNext()
         end)
     end
 end
 
-function WB:SendBatch()
+function WB:SendNext()
     if #self.queue == 0 then
         debugLog("skip send; queue empty")
         return false
@@ -315,35 +312,51 @@ function WB:SendBatch()
         return false
     end
 
-    local batch = self.queue
-    self.queue = {}
-    self.queuedKeys = {}
-
-    local names = {}
-    for _, entry in ipairs(batch) do
-        names[#names + 1] = entry.name
-    end
-
-    local message = self:BuildMessage(formatNames(names))
+    local entry = self.queue[1]
+    local message = self:BuildMessage(entry.name)
     local ok, err
-    if GC.API and GC.API.SendGuildMessage then
+    if settings().welcomeMessageChannel == "WHISPER" then
+        if SendChatMessage then
+            ok, err = pcall(SendChatMessage, message, "WHISPER", nil, entry.target or entry.key)
+            if not ok then err = tostring(err) end
+        else
+            ok, err = false, "whisper API unavailable"
+        end
+    elseif GC.API and GC.API.SendGuildMessage then
         ok, err = GC.API.SendGuildMessage(message)
     else
         ok, err = false, "guild chat API unavailable"
     end
     if not ok then
         debugLog("welcome send failed", err or "unknown error")
-        for _, entry in ipairs(batch) do
-            self.queue[#self.queue + 1] = entry
-            self.queuedKeys[entry.key] = true
+        entry.sendAttempts = (entry.sendAttempts or 0) + 1
+        if entry.sendAttempts < 3 then
+            self.timer = C_Timer.NewTimer(15, function()
+                self.timer = nil
+                self:SendNext()
+            end)
+        else
+            table.remove(self.queue, 1)
+            self.queuedKeys[entry.key] = nil
+            debugLog("welcome abandoned after three failed sends", entry.name)
+            if #self.queue > 0 then self:StartTimer() end
         end
         return false
     end
 
-    for _, entry in ipairs(batch) do
-        self:MarkWelcomed(entry)
-    end
+    table.remove(self.queue, 1)
+    self.queuedKeys[entry.key] = nil
+    self:MarkWelcomed(entry)
     self:PruneRecent()
     debugLog("welcome message sent", message)
+    if #self.queue > 0 then
+        self:StartTimer()
+    end
     return true
+end
+
+-- Compatibility alias for callers and saved debugging notes from the previous
+-- batched implementation.
+function WB:SendBatch()
+    return self:SendNext()
 end

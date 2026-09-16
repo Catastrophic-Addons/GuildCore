@@ -7,10 +7,18 @@ GC.Settings:RegisterCategory({
     keywords = "messaging welcome batch template chat",
     build = function(S, parent, y)
         y = select(2, S:CreateSection(parent, "Messaging", y))
-        _, y = S:CreateToggle(parent, y, { key = "enableMessagingModule", label = "Enable Messaging System", description = "Enable queued guild-wide messaging tools.", default = true })
-        _, y = S:CreateToggle(parent, y, { key = "enableWelcomeBatch", label = "Batched Welcome Messages", description = "Collect new guild joins and send one welcome after the batch window.", default = true })
-        _, y = S:CreateInput(parent, y, { key = "welcomeBatchWindowSeconds", label = "Welcome Batch Window", description = "Seconds to collect new joins before sending the welcome.", numeric = true, min = 15, default = 180 })
-        _, y = S:CreateInput(parent, y, { key = "welcomeMessageTemplate", label = "Welcome Template", description = "Use {names} where new member names should appear.", width = 300, default = "Welcome to the guild, {names}! Glad to have you aboard!" })
+        _, y = S:CreateToggle(parent, y, { key = "enableMessagingModule", label = "Enable Messaging System", description = "Enable saved messages and guild communication tools.", default = true })
+        _, y = S:CreateToggle(parent, y, { key = "enableWelcomeBatch", label = "Automatic Member Welcome", description = "Send one welcome when a new member joins.", default = true })
+        _, y = S:CreateDropdown(parent, y, {
+            key = "welcomeMessageChannel", label = "Welcome Destination", description = "Choose whether each welcome appears in guild chat or is sent privately.",
+            options = {
+                { key = "GUILD", label = "Guild Chat" },
+                { key = "WHISPER", label = "Private Whisper" },
+            },
+            default = "GUILD", width = 170,
+        })
+        _, y = S:CreateInput(parent, y, { key = "welcomeIndividualDelaySeconds", label = "Welcome Delay", description = "Seconds to wait for the guild roster to settle before welcoming the member.", numeric = true, min = 1, default = 3 })
+        _, y = S:CreateInput(parent, y, { key = "welcomeMessageTemplate", label = "Welcome Message", description = "Use {name} where the new member's name should appear.", width = 300, default = "Welcome to the guild, {name}! Glad to have you with us!" })
         return y
     end,
 })

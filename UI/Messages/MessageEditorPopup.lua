@@ -111,6 +111,32 @@ function MEP:RefreshCategoryButton()
     self.categoryBtn:SetLabel(category and category.name or "General")
 end
 
+function MEP:RefreshChannelControls()
+    if not draft or not self.channelBtn then return end
+    local svc = MS()
+    local info = svc and svc:GetChannelInfo(draft.targetChannel or "GUILD")
+    self.channelBtn:SetLabel(info and info.label or "Guild")
+    local showPublicChannel = info and info.requiresChannel == true
+    if self.channelNameLabel then self.channelNameLabel:SetShown(showPublicChannel) end
+    if self.channelNameInput then self.channelNameInput:SetShown(showPublicChannel) end
+end
+
+function MEP:CycleChannel()
+    local svc = MS()
+    local channels = svc and svc:GetSupportedChannels() or {}
+    if #channels == 0 or not draft then return end
+    local nextIndex = 1
+    for index, channel in ipairs(channels) do
+        if channel.key == (draft.targetChannel or "GUILD") then
+            nextIndex = index + 1
+            break
+        end
+    end
+    if nextIndex > #channels then nextIndex = 1 end
+    draft.targetChannel = channels[nextIndex].key
+    self:RefreshChannelControls()
+end
+
 function MEP:CycleCategory()
     local categories = self:GetCategories()
     if #categories == 0 then return end
@@ -202,11 +228,19 @@ function MEP:Create()
 
     self.titleInput = makeInput(frame, "Message Title", 14, -52, 292)
     makeLabel(frame, "Category", 326, -52)
-    self.categoryBtn = GC.UI.Button.Create(frame, "General", "secondary", 180, Th.btnH)
+    self.categoryBtn = GC.UI.Button.Create(frame, "General", "secondary", 128, Th.btnH)
     self.categoryBtn:SetPoint("TOPLEFT", frame, "TOPLEFT", 326, -68)
     self.categoryBtn:SetScript("OnClick", function() self:CycleCategory() end)
 
-    self.notesInput = makeInput(frame, "Notes", 14, -104, 580)
+    makeLabel(frame, "Default Channel", 470, -52)
+    self.channelBtn = GC.UI.Button.Create(frame, "Guild", "secondary", 156, Th.btnH)
+    self.channelBtn:SetPoint("TOPLEFT", frame, "TOPLEFT", 470, -68)
+    self.channelBtn:SetScript("OnClick", function() self:CycleChannel() end)
+
+    self.notesInput = makeInput(frame, "Notes", 14, -104, 388)
+    self.channelNameLabel = makeLabel(frame, "Channel Number", 420, -104)
+    self.channelNameInput = GC.UI.Panel.Input(frame, 174, Th.inputH)
+    self.channelNameInput:SetPoint("TOPLEFT", frame, "TOPLEFT", 420, -120)
 
     makeLabel(frame, "Message Body", 14, -156)
     local bodyHolder, bodyInput = createMultilineInput(frame, 260)
@@ -231,6 +265,7 @@ function MEP:Create()
             title = draft.title,
             body = draft.body,
             targetChannel = draft.targetChannel,
+            targetChannelName = draft.targetChannelName,
         })
     end)
 
@@ -256,6 +291,7 @@ function MEP:SaveDraftFields()
     draft.title = self.titleInput:GetText() or ""
     draft.notes = self.notesInput:GetText() or ""
     draft.body = self.bodyInput:GetText() or ""
+    draft.targetChannelName = self.channelNameInput and self.channelNameInput:GetText() or ""
 end
 
 function MEP:Open(options)
@@ -271,6 +307,7 @@ function MEP:Open(options)
         notes = message.notes or "",
         body = message.body or "",
         targetChannel = message.targetChannel or "GUILD",
+        targetChannelName = message.targetChannelName or (mode == "new" and "/12" or ""),
         favorite = mode == "edit" and message.favorite == true or false,
         archived = mode == "edit" and message.archived == true or false,
         onSave = options.onSave,
@@ -280,9 +317,11 @@ function MEP:Open(options)
     self.titleInput:SetText(draft.title)
     self.notesInput:SetText(draft.notes)
     self.bodyInput:SetText(draft.body)
+    self.channelNameInput:SetText(draft.targetChannelName)
     self.bodyInput:ClearFocus()
     self.placeholderIndex = 1
     self:RefreshCategoryButton()
+    self:RefreshChannelControls()
     self:RefreshPlaceholderButton()
     self:RefreshStats()
     self.frame:Show()
@@ -296,6 +335,10 @@ function MEP:Save()
     if not svc then status("Messaging service is unavailable.", "textDanger"); return end
     if trim(draft.title) == "" then status("Message title is required.", "textDanger"); return end
     if trim(draft.body) == "" then status("Message body is required.", "textDanger"); return end
+    if draft.targetChannel == "CHANNEL" and trim(draft.targetChannelName) == "" then
+        status("Enter a channel number, such as /12.", "textDanger")
+        return
+    end
 
     local fields = {
         title = draft.title,
@@ -303,6 +346,7 @@ function MEP:Save()
         notes = draft.notes,
         body = draft.body,
         targetChannel = draft.targetChannel or "GUILD",
+        targetChannelName = draft.targetChannelName,
         favorite = draft.favorite,
         archived = draft.archived,
     }

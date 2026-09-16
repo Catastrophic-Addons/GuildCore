@@ -2,7 +2,7 @@
 
 Guild Core is a Retail World of Warcraft addon for guild roster intelligence, recruitment, officer workflows, communication, and member history tracking.
 
-Current addon version: `1.5.9`
+Current addon version: `1.5.29b`
 
 ## Current Module Structure
 
@@ -25,7 +25,7 @@ Current addon version: `1.5.9`
 - `Modules/Invite/`
   Recruitment scanning, invite candidate filtering, direct user-triggered guild invites, invite history, recent-decline tracking, and invite UI state.
 - `Modules/WelcomeBatch/`
-  Batched post-join guild welcome messages using system-message detection plus guild roster comparison.
+  Individual post-join guild welcome messages using system-message detection plus guild roster comparison.
 - `Modules/Operations/`
   Officer macro helpers and MOTD support.
 - `Modules/Purge/`
@@ -103,7 +103,7 @@ Parsed note fields are stored under each player record as officer-data fields an
 ```lua
 GuildCoreDB = {
   meta = {
-    dbVersion = 18,
+    dbVersion = 22,
   },
   settings = {
     autoScanIntervalMinutes = 60,
@@ -124,8 +124,9 @@ GuildCoreDB = {
     inviteHotkey = "CTRL-SHIFT-I",
     inviteScanHotkey = "CTRL-SHIFT-S",
     enableWelcomeBatch = true,
-    welcomeBatchWindowSeconds = 180,
-    welcomeMessageTemplate = "Welcome to the guild, {names}! Glad to have you aboard!",
+    welcomeIndividualDelaySeconds = 3,
+    welcomeMessageChannel = "GUILD",
+    welcomeMessageTemplate = "Welcome to the guild, {name}! Glad to have you with us!",
   },
   ui = {
     lastPanel = "dashboard",
@@ -369,6 +370,7 @@ Known limitations:
 - Every tracked character can be marked as `Main`, `Alt`, or `Unknown`.
 - Alts store their parent in `player.main`.
 - Mains store child links in `player.alts`.
+- When a character leaves the guild, it is removed from every stored alt list. If the departing character was a Main, the first remaining active character in its saved alt list is promoted to Main and the other active alts are relinked to it.
 - Validation blocks:
   self-links, circular chains, linking to unknown characters, linking to inactive/untracked characters, and using an alt as a main target.
 - Changing a character to `Unknown` is blocked if that character still owns linked alts.
@@ -413,23 +415,22 @@ Known limitations:
 - WoW's protected-action model still applies:
   unattended automated guild invites are not reliable or appropriate, so GuildCore favors explicit user-triggered invite actions.
 
-## Batched Welcome Messages
+## Automatic Member Welcomes
 
 - `Modules/WelcomeBatch/Service.lua` watches for new guild joins using two signals:
   localized `CHAT_MSG_SYSTEM` join text when available, and debounced `GUILD_ROSTER_UPDATE` roster comparison as the reliable fallback.
 - Existing roster members become the baseline on login or `/reload`, which prevents welcoming the whole guild after startup.
-- New joins are collected into a queue and sent as one guild chat message after the configured batch window.
-  The default window is `180` seconds and the Settings UI enforces a minimum of `15` seconds.
+- Each new join receives a separate guild chat welcome after a short roster-settling delay.
+  The default delay is `3` seconds and multiple joins are paced as individual messages.
+- The destination can be Guild Chat or a private cross-realm-aware Whisper.
 - The default template is:
-  `Welcome to the guild, {names}! Glad to have you aboard!`
-- `{names}` is replaced with a natural list:
-  `Allisock`, `Allisock and Steve`, or `Allisock, Steve, and Danktotemz`.
-  If `{names}` is missing from the template, GuildCore appends the names safely.
+  `Welcome to the guild, {name}! Glad to have you with us!`
+- `{name}` is replaced with the newly joined character's name. Existing custom templates using `{names}` remain compatible.
 - Duplicate protection uses normalized character keys plus `guild.welcomeBatch.recentWelcomed`, so reloads or repeated roster events do not resend the same welcome.
 - Sending is skipped when:
   the feature is disabled, the Messaging module is disabled, the queue is empty, the character is not in a guild, guild chat permission is unavailable, or combat lockdown is active.
   Combat skips are retried after a short delay.
-- Welcome messages are capped to a guild-chat-safe length; very large batches collapse to an `and others` form rather than producing an oversized chat line.
+- Failed sends retry twice at a safe interval before the entry is released.
 - Debug mode logs detection, queueing, timer start, sending, and skipped-send reasons.
 
 ## Messages Module
@@ -452,13 +453,8 @@ Known limitations:
 - `@new.member` is fed by `CHAT_MSG_SYSTEM` join detection and remembers the most recent guild join seen by the addon.
 - Long messages are previewed through `GC.Services.MessageChunker`, which:
   prefers paragraph breaks, then sentence boundaries, then word boundaries, and only hard-splits when needed.
-- Chunk preview uses a configurable character limit and automatically adds numbering like `(1/3)` when multiple chunks are produced.
-- Manual Mode remains the default.
-  In Manual Mode, direct-send buttons queue resolved chunks without sending them immediately.
-- Auto Mode is optional and clearly labeled in the UI.
-  When enabled, queued chunks can be sent automatically with a configurable delay and a visible stop control.
-- Queue safety rules:
-  the module rejects empty chunks, enforces a max queue size, reports malformed queue entries without silently deleting them, avoids duplicate auto-send loops, and stops auto-send if the messaging module is disabled.
+- Chunk preview uses WoW's 255-character chat limit and shows each part before sending.
+- Clicking `Send` transmits the first part immediately. Additional parts are paced automatically to reduce chat throttling without creating a user-facing queue.
 - Saved templates now support direct-send buttons and drag-and-drop reorder within the selected category.
   Up/Down buttons remain available as a fallback, and templates can be searched, duplicated, favorited, archived, unarchived, or deleted after confirmation.
 - Archived templates and categories are hidden by default and can be shown with the Messaging panel filters.
@@ -468,11 +464,9 @@ Known limitations:
   Imports are handled by the `MessageTemplateBridge` service, validate first, create missing categories safely, and create local template copies without importing usage history.
 - Future campaign storage lives under `messagingCampaigns`, but no triggered campaign sending or network bridge is active.
 - Output safety:
-  loading a selected chunk into chat is the safest flow, while direct sending uses the queue plus a light pacing guard to reduce spam risk.
-- The Messaging panel includes a target channel selector for `GUILD`, `OFFICER`, `WHISPER`, `SAY`, `YELL`, `PARTY`, `RAID`, and `INSTANCE_CHAT`.
-  Whisper output requires a recipient before queueing, sending, or loading a chunk into chat.
-- Riskier channels and outputs longer than three chunks ask for confirmation before queueing or starting Auto Mode.
-  Manual Mode remains the default.
+  direct sends validate the selected destination and use light background pacing for multi-part messages.
+- The Messaging panel includes a target channel selector for `GUILD`, `OFFICER`, `WHISPER`, `SAY`, `YELL`, `PARTY`, `RAID`, `INSTANCE_CHAT`, and numbered public channels such as `/12`. Public-channel sends use the same channel number shown in WoW chat; names such as `LookingForGroup` are also accepted when WoW can resolve them.
+  Whisper output requires a recipient before sending or loading a chunk into chat.
 
 ## Purge Safety
 
@@ -505,12 +499,12 @@ Known limitations:
 - Sync remains a stub and does not yet reconcile roster intelligence between clients.
 - The prompt UI supports typed main selection, not a full searchable dropdown yet.
 - WoW addons cannot copy text to the OS clipboard directly.
-  The Messages panel therefore focuses on previewing chunks, loading them into chat input safely, and queueing direct sends carefully.
+  The Messages panel therefore focuses on previewing and sending saved messages to a clearly selected destination.
 - Blizzard chat throttling and server-side anti-spam protections still apply.
-  Auto Mode uses a paced loop, but addons still cannot guarantee delivery timing if Blizzard throttles or blocks outgoing chat.
+  Multi-part sends use a paced loop, but addons still cannot guarantee delivery timing if Blizzard throttles or blocks outgoing chat.
 - Guild invites require an explicit user-triggered action.
   GuildCore supports `Invite Next` and an invite hotkey, but does not provide unattended bulk guild invites.
-- Batched welcome messages use the best join signals available to addons.
+- Automatic member welcomes use the best join signals available to addons.
   Roster comparison is the fallback when localized system text is missing or inconsistent.
 
 ## Next Roadmap Items

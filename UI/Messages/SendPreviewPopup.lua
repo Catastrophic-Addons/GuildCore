@@ -1,5 +1,5 @@
 -- UI/Messages/SendPreviewPopup.lua
--- Focused send/queue preview for saved messages.
+-- Focused send preview for saved messages.
 local addonName, ns = ...
 local GC = ns.GuildCore
 
@@ -8,7 +8,7 @@ local SPP = GC.UI.SendPreviewPopup
 
 local currentMessage = nil
 local currentPreview = {}
-local onQueued = nil
+local onSent = nil
 
 local function T() return GC.UI.Theme end
 local function MS() return GC.Services.Messages end
@@ -80,22 +80,36 @@ function SPP:CycleChannel()
         if row.key == current then nextIndex = index + 1; break end
     end
     if nextIndex > #rows then nextIndex = 1 end
+    local previousInfo = self:GetChannelInfo(current)
+    local currentValue = self.recipientInput and self.recipientInput:GetText() or ""
+    if previousInfo.requiresRecipient then
+        self.whisperRecipient = currentValue
+    elseif previousInfo.requiresChannel then
+        self.publicChannel = currentValue
+    end
     self.channelKey = rows[nextIndex].key
+    local nextInfo = self:GetChannelInfo(self.channelKey)
+    if self.recipientInput then
+        if nextInfo.requiresRecipient then
+            self.recipientInput:SetText(self.whisperRecipient or "")
+        elseif nextInfo.requiresChannel then
+            self.recipientInput:SetText(self.publicChannel or "/12")
+        else
+            self.recipientInput:SetText("")
+        end
+    end
     self:Refresh()
 end
 
 function SPP:GetOptions()
-    local delay = tonumber(self.delayInput and self.delayInput:GetText() or "") or 2
-    local limit = tonumber(self.limitInput and self.limitInput:GetText() or "") or 255
-    limit = math.max(20, math.min(255, math.floor(limit)))
     return {
         target = self.channelKey or "GUILD",
-        recipient = self.recipientInput and self.recipientInput:GetText() or "",
+        recipient = self.channelKey == "WHISPER" and (self.recipientInput and self.recipientInput:GetText() or "") or "",
+        publicChannel = self.channelKey == "CHANNEL" and (self.recipientInput and self.recipientInput:GetText() or "") or "",
         targetName = self.targetInput and self.targetInput:GetText() or "",
-        limit = limit,
+        limit = 255,
         dailyTargetHour = 18,
         dailyTargetMinute = 0,
-        delay = math.max(0.5, delay),
     }
 end
 
@@ -115,18 +129,10 @@ function SPP:Refresh()
     local options = self:GetOptions()
     local info = self:GetChannelInfo(options.target)
     self.channelBtn:SetLabel(info.label or options.target)
-    self.recipientLabel:SetShown(info.requiresRecipient == true)
-    self.recipientInput:SetShown(info.requiresRecipient == true)
-    if self.modeBtn and svc then
-        self.modeBtn:SetLabel(svc:GetAutomationEnabled() and "Mode: Auto" or "Mode: Manual")
-    end
-    if not self.delayInput:HasFocus() and svc then
-        self.delayInput:SetText(string.format("%.1f", svc:GetAutoSendDelaySeconds()))
-    end
-    if not self.limitInput:HasFocus() then
-        self.limitInput:SetText(tostring(options.limit))
-    end
-
+    local showDestination = info.requiresRecipient == true or info.requiresChannel == true
+    self.recipientLabel:SetText(info.requiresChannel and "Channel Number" or "Target")
+    self.recipientLabel:SetShown(showDestination)
+    self.recipientInput:SetShown(showDestination)
     currentPreview = self:BuildPreview()
     local lines = {}
     for index, chunk in ipairs(currentPreview or {}) do
@@ -135,27 +141,30 @@ function SPP:Refresh()
     if #lines == 0 then lines[1] = "No preview available." end
     self.previewBox.text:SetText(table.concat(lines, "\n\n"))
     self.previewBox.content:SetHeight(math.max(1, self.previewBox.text:GetStringHeight() + 8))
-    self.summary:SetText(string.format("%d chunk%s prepared for %s", #currentPreview, #currentPreview == 1 and "" or "s", info.label or options.target))
+    local destination = info.label or options.target
+    if info.requiresChannel and trim(options.publicChannel) ~= "" then
+        local channelValue = trim(options.publicChannel)
+        if channelValue:match("^%d+$") then channelValue = "/" .. channelValue end
+        destination = destination .. " (" .. channelValue .. ")"
+    end
+    self.summary:SetText(string.format("%d chunk%s prepared for %s", #currentPreview, #currentPreview == 1 and "" or "s", destination))
 end
 
-function SPP:QueueSend()
+function SPP:SendNow()
     local svc = MS()
     if not svc or not currentMessage then return end
     local options = self:GetOptions()
-    local ok, err = svc:SetAutoSendDelaySeconds(options.delay)
-    if not ok then status(err or "Invalid send delay.", "textDanger"); return end
     currentPreview = self:BuildPreview()
-    ok, err = svc:QueueChunks(currentPreview, {
+    local ok, err, result = svc:SendChunksNow(currentPreview, {
         target = options.target,
         recipient = options.recipient,
+        publicChannel = options.publicChannel,
         sourceMessageId = currentMessage.id,
     })
-    if not ok then status(err or "Unable to queue message.", "textDanger"); return end
-    if svc:GetAutomationEnabled() then
-        svc:StartAutoSend()
-    end
-    if onQueued then onQueued() end
-    status(svc:GetAutomationEnabled() and "Message queued and auto-send started." or "Message queued.", "textSuccess")
+    if not ok then status(err or "Unable to send message.", "textDanger"); return end
+    if onSent then onSent() end
+    local chunkCount = result and result.chunkCount or #currentPreview
+    status(chunkCount > 1 and (tostring(chunkCount) .. " messages sent.") or "Message sent.", "textSuccess")
     self:Cancel()
 end
 
@@ -201,29 +210,10 @@ function SPP:Create()
     self.targetInput = GC.UI.Panel.Input(frame, 140, Th.inputH)
     self.targetInput:SetPoint("TOPLEFT", targetLabel, "BOTTOMLEFT", 0, -4)
 
-    local delayLabel = Th.Fs(frame, "tiny", "Delay", "textDimmed")
-    delayLabel:SetPoint("TOPLEFT", frame, "TOPLEFT", 460, -70)
-    self.delayInput = GC.UI.Panel.Input(frame, 56, Th.inputH)
-    self.delayInput:SetPoint("TOPLEFT", delayLabel, "BOTTOMLEFT", 0, -4)
-
-    local limitLabel = Th.Fs(frame, "tiny", "Limit", "textDimmed")
-    limitLabel:SetPoint("TOPLEFT", frame, "TOPLEFT", 530, -70)
-    self.limitInput = GC.UI.Panel.Input(frame, 56, Th.inputH)
-    self.limitInput:SetPoint("TOPLEFT", limitLabel, "BOTTOMLEFT", 0, -4)
-
     local refreshBtn = GC.UI.Button.Create(frame, "Preview", "secondary", 76, Th.btnH)
     refreshBtn:SetPoint("TOPLEFT", frame, "TOPLEFT", 14, -108)
     refreshBtn:SetScript("OnClick", function() self:Refresh() end)
     self.refreshBtn = refreshBtn
-
-    self.modeBtn = GC.UI.Button.Create(frame, "Mode: Manual", "secondary", 112, Th.btnH)
-    self.modeBtn:SetPoint("LEFT", refreshBtn, "RIGHT", 8, 0)
-    self.modeBtn:SetScript("OnClick", function()
-        local svc = MS()
-        if not svc then return end
-        svc:SetAutomationEnabled(not svc:GetAutomationEnabled())
-        self:Refresh()
-    end)
 
     self.previewBox = createMultilineDisplay(frame)
     self.previewBox:SetPoint("TOPLEFT", frame, "TOPLEFT", 14, -148)
@@ -235,9 +225,9 @@ function SPP:Create()
     footer:SetHeight(50)
     Th.Bg(footer, Th.c.chrome, Th.c.border)
 
-    local queueBtn = GC.UI.Button.Create(footer, "Queue Send", "primary", 104, Th.btnH)
-    queueBtn:SetPoint("RIGHT", footer, "RIGHT", -96, 0)
-    queueBtn:SetScript("OnClick", function() self:QueueSend() end)
+    local sendBtn = GC.UI.Button.Create(footer, "Send", "primary", 92, Th.btnH)
+    sendBtn:SetPoint("RIGHT", footer, "RIGHT", -96, 0)
+    sendBtn:SetScript("OnClick", function() self:SendNow() end)
     local cancel = GC.UI.Button.Create(footer, "Cancel", "secondary", 78, Th.btnH)
     cancel:SetPoint("RIGHT", footer, "RIGHT", -12, 0)
     cancel:SetScript("OnClick", function() self:Cancel() end)
@@ -246,13 +236,13 @@ end
 function SPP:Open(message, options)
     self:Create()
     currentMessage = message
-    onQueued = options and options.onQueued or nil
+    onSent = options and options.onSent or nil
     self.channelKey = message and message.targetChannel or "GUILD"
+    self.whisperRecipient = ""
+    self.publicChannel = message and message.targetChannelName or "/12"
     self.title:SetText("Send Preview: " .. tostring(message and message.title or "Message"))
-    self.recipientInput:SetText("")
+    self.recipientInput:SetText(self.channelKey == "CHANNEL" and self.publicChannel or "")
     self.targetInput:SetText("")
-    if MS() then self.delayInput:SetText(string.format("%.1f", MS():GetAutoSendDelaySeconds())) end
-    self.limitInput:SetText("255")
     self.frame:Show()
     self:Refresh()
 end
@@ -261,5 +251,7 @@ function SPP:Cancel()
     if self.frame then self.frame:Hide() end
     currentMessage = nil
     currentPreview = {}
-    onQueued = nil
+    onSent = nil
+    self.whisperRecipient = nil
+    self.publicChannel = nil
 end

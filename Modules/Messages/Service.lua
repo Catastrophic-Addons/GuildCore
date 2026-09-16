@@ -16,6 +16,7 @@ local SUPPORTED_CHANNELS = {
     PARTY         = { key = "PARTY",          id = "PARTY",          label = "Party",     chatPrefix = "/p ",    slashPrefix = "/p ",    requiresRecipient = false, risky = false },
     RAID          = { key = "RAID",           id = "RAID",           label = "Raid",      chatPrefix = "/raid ", slashPrefix = "/raid ", requiresRecipient = false, risky = true  },
     INSTANCE_CHAT = { key = "INSTANCE_CHAT",  id = "INSTANCE_CHAT",  label = "Instance",  chatPrefix = "/i ",    slashPrefix = "/i ",    requiresRecipient = false, risky = true  },
+    CHANNEL       = { key = "CHANNEL",        id = "CHANNEL",        label = "Public Channel", requiresRecipient = false, requiresChannel = true, risky = true },
 }
 
 local CHANNEL_ALIASES = {
@@ -31,6 +32,39 @@ local function normalizeChannelId(channelId)
     return CHANNEL_ALIASES[channelId] or channelId
 end
 
+local function resolvePublicChannel(value)
+    local publicChannel = trim(value)
+    if publicChannel == "" then
+        return nil, nil
+    end
+
+    -- A numbered chat target is already the exact value WoW uses for /1, /12,
+    -- and similar channel commands. Do not pass it back through GetChannelName:
+    -- some clients interpret a numeric argument as a list index and return 0.
+    local slashNumber = publicChannel:match("^/(%d+)$")
+    local channelNumber = tonumber(slashNumber or publicChannel)
+    if channelNumber and channelNumber > 0 then
+        channelNumber = math.floor(channelNumber)
+        return channelNumber, "/" .. tostring(channelNumber)
+    end
+
+    if GetChannelName then
+        local lookup = publicChannel
+        local compactName = publicChannel:lower():gsub("[^a-z]", "")
+        if compactName == "lfg" or compactName == "lookforgroup" or compactName == "lookingforgroup" then
+            lookup = "LookingForGroup"
+        end
+        local ok, resolvedNumber = pcall(GetChannelName, lookup)
+        resolvedNumber = ok and tonumber(resolvedNumber) or nil
+        if resolvedNumber and resolvedNumber > 0 then
+            resolvedNumber = math.floor(resolvedNumber)
+            return resolvedNumber, publicChannel
+        end
+    end
+
+    return nil, publicChannel
+end
+
 -- Channel methods
 
 function MessagesService:GetSupportedChannels()
@@ -43,6 +77,7 @@ function MessagesService:GetSupportedChannels()
         SUPPORTED_CHANNELS.PARTY,
         SUPPORTED_CHANNELS.RAID,
         SUPPORTED_CHANNELS.INSTANCE_CHAT,
+        SUPPORTED_CHANNELS.CHANNEL,
     }
     local rows = {}
     for _, channel in ipairs(channels) do
@@ -89,17 +124,43 @@ function MessagesService:ValidateChannelOptions(options)
         return false, "Whisper recipient is required."
     end
 
+    local publicChannel = trim(options.publicChannel or options.channelName)
+    local publicChannelNumber
+    if channel.requiresChannel then
+        if publicChannel == "" then
+            return false, "Enter a channel number, such as /12."
+        end
+
+        local normalizedChannel
+        publicChannelNumber, normalizedChannel = resolvePublicChannel(publicChannel)
+        if not publicChannelNumber or publicChannelNumber <= 0 then
+            return false, "Channel not found. Enter its chat number, such as /12."
+        end
+        publicChannel = normalizedChannel
+    end
+
+    local canSend, reason = true, nil
+    if GC.Permissions and GC.Permissions.CanSendMessageChannel then
+        canSend, reason = GC.Permissions:CanSendMessageChannel(channel.key)
+    end
+    if not canSend then
+        return false, reason or "You do not have permission to send to this channel."
+    end
+
     local normalizedOptions = {
-        target    = channel.key,
-        recipient = recipient ~= "" and recipient or nil,
+        target              = channel.key,
+        recipient           = recipient ~= "" and recipient or nil,
+        publicChannel       = publicChannel ~= "" and publicChannel or nil,
+        publicChannelNumber = publicChannelNumber,
     }
     return true, nil, copyTable(channel), normalizedOptions
 end
 
-function MessagesService:ValidateTargetChannel(channelId, recipient)
+function MessagesService:ValidateTargetChannel(channelId, recipient, publicChannel)
     return self:ValidateChannelOptions({
         target    = channelId,
         recipient = recipient,
+        publicChannel = publicChannel,
     })
 end
 

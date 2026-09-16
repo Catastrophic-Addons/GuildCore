@@ -81,6 +81,7 @@ function I:ListMessages(categoryId, options)
                 lastUsedAt   = message.lastUsedAt,
                 lastUsedLabel = message.lastUsedAt and date("%Y-%m-%d", message.lastUsedAt) or nil,
                 targetChannel = message.targetChannel or "GUILD",
+                targetChannelName = message.targetChannelName,
                 tags         = copyTable(message.tags),
                 usageCount   = tonumber(message.usageCount) or 0,
                 createdBy    = message.createdBy,
@@ -116,6 +117,7 @@ function I:CreateMessage(fields)
         notes         = tostring(fields.notes or ""),
         -- NormalizeTargetChannel is added by Service.lua, resolved at call time
         targetChannel = self:NormalizeTargetChannel(fields.targetChannel or fields.target or "GUILD"),
+        targetChannelName = trim(fields.targetChannelName or fields.publicChannel) ~= "" and trim(fields.targetChannelName or fields.publicChannel) or nil,
         tags          = normalizeTags(fields.tags),
         usageCount    = 0,
         createdBy     = actor,
@@ -153,6 +155,10 @@ function I:UpdateMessage(messageId, fields)
     message.notes = tostring(fields.notes ~= nil and fields.notes or message.notes or "")
     if fields.targetChannel ~= nil or fields.target ~= nil then
         message.targetChannel = self:NormalizeTargetChannel(fields.targetChannel or fields.target)
+    end
+    if fields.targetChannelName ~= nil or fields.publicChannel ~= nil then
+        local channelName = trim(fields.targetChannelName or fields.publicChannel)
+        message.targetChannelName = channelName ~= "" and channelName or nil
     end
     if fields.tags     ~= nil then message.tags     = normalizeTags(fields.tags) end
     if fields.favorite ~= nil then message.favorite = fields.favorite == true end
@@ -262,6 +268,7 @@ function I:DuplicateMessage(messageId)
         body          = tostring(source.body or ""),
         notes         = tostring(source.notes or ""),
         targetChannel = self:NormalizeTargetChannel(source.targetChannel or "GUILD"),
+        targetChannelName = trim(source.targetChannelName) ~= "" and trim(source.targetChannelName) or nil,
         tags          = normalizeTags(source.tags),
         usageCount    = 0,
         createdBy     = actor,
@@ -298,6 +305,7 @@ function I:RecordMessageUsage(messageId, output)
         title      = message.title,
         target     = target,
         recipient  = output.recipient,
+        publicChannel = output.publicChannel or message.targetChannelName,
         sentBy     = output.sentBy or currentPlayerName() or "Unknown",
         sentAt     = stamp,
         chunkCount = output.chunkCount or 1,

@@ -131,6 +131,50 @@ local function collectConnectedGroup(seedKeys)
     return keys, seen
 end
 
+local function choosePreservedMain(requestedMainKey, groupKeys, options)
+    if options and options.preserveExistingMain == false then
+        return requestedMainKey
+    end
+
+    local cursorKey = requestedMainKey
+    local chainSeen = {}
+    while cursorKey do
+        if chainSeen[cursorKey] then break end
+        chainSeen[cursorKey] = true
+        local player = getPlayer(cursorKey)
+        if not player or not player.main then break end
+        cursorKey = player.main
+    end
+    local requestedChainMain = cursorKey and getPlayer(cursorKey) or nil
+    if requestedChainMain and requestedChainMain.status == "active" and requestedChainMain.classification == "main" then
+        return cursorKey
+    end
+
+    local mains = {}
+    local mainSeen = {}
+    for _, key in ipairs(groupKeys or {}) do
+        local player = getPlayer(key)
+        if player and player.status == "active" and player.classification == "main" and not mainSeen[key] then
+            mainSeen[key] = true
+            mains[#mains + 1] = key
+        end
+    end
+
+    if #mains == 0 then
+        return requestedMainKey
+    end
+    if #mains == 1 then
+        return mains[1]
+    end
+    for _, key in ipairs(mains) do
+        if key == requestedMainKey then
+            return requestedMainKey
+        end
+    end
+    table.sort(mains)
+    return mains[1]
+end
+
 local function sanitizeAltList(ownerKey, altList, removeKeys)
     local cleaned, seen = {}, {}
     removeKeys = removeKeys or {}
@@ -400,13 +444,14 @@ function AltService:ValidateLink(mainKey, altKey)
     return true
 end
 
-function AltService:NormalizeGroup(mainKey, extraKeys, reason)
-    local mainPlayer = isActivePlayer(mainKey)
-    if not mainPlayer then
+function AltService:NormalizeGroup(mainKey, extraKeys, reason, options)
+    local requestedMainKey = mainKey
+    local requestedMainPlayer = isActivePlayer(requestedMainKey)
+    if not requestedMainPlayer then
         return false, "Selected main character is not in the active roster cache."
     end
 
-    local seeds, seedSeen = { mainKey }, { [mainKey] = true }
+    local seeds, seedSeen = { requestedMainKey }, { [requestedMainKey] = true }
     for _, key in ipairs(extraKeys or {}) do
         if key and not seedSeen[key] then
             seeds[#seeds + 1] = key
@@ -415,13 +460,19 @@ function AltService:NormalizeGroup(mainKey, extraKeys, reason)
     end
 
     local groupKeys, groupSeen = collectConnectedGroup(seeds)
-    if not groupSeen[mainKey] then
-        groupKeys[#groupKeys + 1] = mainKey
-        groupSeen[mainKey] = true
+    if not groupSeen[requestedMainKey] then
+        groupKeys[#groupKeys + 1] = requestedMainKey
+        groupSeen[requestedMainKey] = true
     end
 
     local roster = players()
     if not roster then return false, "Roster data is unavailable." end
+
+    mainKey = choosePreservedMain(requestedMainKey, groupKeys, options)
+    local mainPlayer = isActivePlayer(mainKey)
+    if not mainPlayer then
+        return false, "Selected main character is not in the active roster cache."
+    end
 
     local altKeys = {}
     for _, key in ipairs(groupKeys) do
@@ -487,6 +538,8 @@ function AltService:NormalizeGroup(mainKey, extraKeys, reason)
     refreshRelationshipViews()
     return true, {
         mainKey = mainKey,
+        requestedMainKey = requestedMainKey,
+        preservedExistingMain = mainKey ~= requestedMainKey,
         altKeys = altKeys,
         members = groupKeys,
         changed = changed,
@@ -499,6 +552,25 @@ function AltService:LinkAlt(mainKey, altKey, reason)
         return false, err
     end
     return self:NormalizeGroup(mainKey, { altKey }, reason or "manual")
+end
+
+function AltService:DescribeLinkResult(result, fallback)
+    if type(result) ~= "table" then
+        return fallback or "Alt link saved."
+    end
+
+    local parts = {}
+    if result.preservedExistingMain and result.mainKey then
+        parts[#parts + 1] = "Kept " .. tostring(result.mainKey) .. " as Main"
+    end
+    local imported = math.max(0, #(result.members or {}) - 2)
+    if imported > 0 then
+        parts[#parts + 1] = "imported " .. tostring(imported) .. " linked character" .. (imported == 1 and "" or "s")
+    end
+    if #parts == 0 then
+        return fallback or "Alt link saved."
+    end
+    return "Alt link saved: " .. table.concat(parts, "; ") .. "."
 end
 
 function AltService:UnlinkAlt(altKey, reason)
@@ -531,7 +603,7 @@ function AltService:SetMain(playerKey, reason)
         return false, "Character not found."
     end
 
-    return self:NormalizeGroup(playerKey, nil, reason or "manual")
+    return self:NormalizeGroup(playerKey, nil, reason or "manual", {preserveExistingMain = false})
 end
 
 function AltService:SetUnknown(playerKey, reason)
@@ -567,12 +639,12 @@ function AltService:SetAlt(playerKey, mainKey, reason)
     end
 
     ensureRelationshipFields(player)
-    local ok, err = self:LinkAlt(mainKey, playerKey, reason)
+    local ok, result = self:LinkAlt(mainKey, playerKey, reason)
     if not ok then
-        return false, err
+        return false, result
     end
 
-    return true
+    return true, result
 end
 
 function AltService:SetMissingMainReference(playerKey, mainKey, reason)
@@ -626,6 +698,126 @@ function AltService:DismissPrompt(playerKey, reason)
     return true
 end
 
+function AltService:HandleCharacterRemoved(playerKey, reason)
+    local roster = players()
+    local removedPlayer = roster and roster[playerKey]
+    if not removedPlayer then
+        return false, "Character not found."
+    end
+
+    reason = reason or "left-guild"
+    ensureRelationshipFields(removedPlayer)
+
+    local originalMain = removedPlayer.main
+    local originalAlts = {}
+    for _, altKey in ipairs(removedPlayer.alts or {}) do
+        originalAlts[#originalAlts + 1] = altKey
+    end
+
+    local candidates, candidateSeen = {}, {}
+    local function addCandidate(key)
+        if key ~= playerKey and not candidateSeen[key] and isActivePlayer(key) and not isPlaceholderKey(key) then
+            candidateSeen[key] = true
+            candidates[#candidates + 1] = key
+        end
+    end
+
+    -- Preserve the user's saved alt order. The first active character in this
+    -- list is the deterministic successor when the Main leaves the guild.
+    for _, altKey in ipairs(originalAlts) do
+        addCandidate(altKey)
+    end
+
+    -- Recover active one-way links after the ordered list has been considered.
+    local linkedOnly = {}
+    for key, player in pairs(roster) do
+        if key ~= playerKey and player and player.status == "active" and player.main == playerKey and not candidateSeen[key] then
+            linkedOnly[#linkedOnly + 1] = key
+        end
+    end
+    table.sort(linkedOnly)
+    for _, key in ipairs(linkedOnly) do addCandidate(key) end
+
+    local wasMain = removedPlayer.classification == "main" or (#originalAlts > 0 and removedPlayer.classification ~= "alt") or #linkedOnly > 0
+    local promotedKey = wasMain and candidates[1] or nil
+    local changed = 0
+
+    -- A departed character must not remain in any character's alt list.
+    for _, player in pairs(roster) do
+        if player then
+            ensureRelationshipFields(player)
+            local before = #player.alts
+            while GC.Utils.RemoveArrayValue(player.alts, playerKey) do end
+            if #player.alts ~= before then changed = changed + 1 end
+        end
+    end
+
+    if promotedKey then
+        local promoted = roster[promotedKey]
+        local oldClassification = promoted.classification
+        local oldMain = promoted.main
+        local remainingAlts = {}
+        for index = 2, #candidates do
+            remainingAlts[#remainingAlts + 1] = candidates[index]
+        end
+
+        ensureRelationshipFields(promoted)
+        promoted.classification = "main"
+        promoted.main = nil
+        promoted.alts = remainingAlts
+        completePrompt(promoted)
+
+        if oldClassification ~= "main" then
+            appendLog("CLASSIFICATION_CHANGED", promotedKey, oldClassification, "main", reason)
+        end
+        if oldMain then
+            appendLog("ALT_UNLINKED", promotedKey, oldMain, nil, reason)
+        end
+
+        for _, altKey in ipairs(remainingAlts) do
+            local altPlayer = roster[altKey]
+            if altPlayer then
+                ensureRelationshipFields(altPlayer)
+                local previousMain = altPlayer.main
+                local previousClassification = altPlayer.classification
+                altPlayer.classification = "alt"
+                altPlayer.main = promotedKey
+                altPlayer.alts = {}
+                completePrompt(altPlayer)
+                if previousClassification ~= "alt" then
+                    appendLog("CLASSIFICATION_CHANGED", altKey, previousClassification, "alt", reason)
+                end
+                if previousMain ~= promotedKey then
+                    appendLog("ALT_LINKED", altKey, previousMain, promotedKey, reason)
+                end
+            end
+        end
+
+        changed = changed + 1
+    elseif originalMain then
+        local mainPlayer = roster[originalMain]
+        if mainPlayer then
+            ensureRelationshipFields(mainPlayer)
+            while GC.Utils.RemoveArrayValue(mainPlayer.alts, playerKey) do end
+        end
+        appendLog("ALT_UNLINKED", playerKey, originalMain, nil, reason)
+    end
+
+    removedPlayer.main = nil
+    removedPlayer.alts = {}
+    removedPlayer.classification = "unknown"
+    removedPlayer.promptState.completedAt = nil
+    removedPlayer.promptState.bootstrapSuppressed = nil
+
+    refreshRelationshipViews()
+    return true, {
+        removedKey = playerKey,
+        promotedMainKey = promotedKey,
+        remainingAltKeys = promotedKey and roster[promotedKey].alts or {},
+        changed = changed,
+    }
+end
+
 GC:RegisterService("Alts", setmetatable({}, AltService))
 
 GC.Modules.RosterRelationships = GC.Modules.RosterRelationships or {}
@@ -634,7 +826,7 @@ local _issueCacheVersion = -1
 local _issueCache = nil
 
 function RosterRelationships:SetMain(characterKey, reason)
-    return GC.Services.Alts:NormalizeGroup(characterKey, nil, reason or "roster-relationships")
+    return GC.Services.Alts:NormalizeGroup(characterKey, nil, reason or "roster-relationships", {preserveExistingMain = false})
 end
 
 function RosterRelationships:NormalizeGroup(mainKey, extraKeys, reason)

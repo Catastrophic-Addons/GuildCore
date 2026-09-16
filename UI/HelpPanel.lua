@@ -39,7 +39,7 @@ local HELP_SECTIONS = {
             "Mark as Alt: type/select the target main in Add Alt, click Mark as Alt, then Save.",
             "Link alts to a main: open the main, add each alt under Add Alt, then Save.",
             "Review issues: Dashboard > Roster Data Issues, then open affected rows.",
-            "Safe cleanup: Dashboard > Repair Alt Links, review preview, then Apply Safe Repairs.",
+            "Safe cleanup: Dashboard > Needs Review, preview the changes, then choose Apply Safe.",
         },
     },
     {
@@ -67,7 +67,7 @@ local HELP_SECTIONS = {
         lines = {
             "Messages stores reusable guild message templates.",
             "Categories organize templates for officers.",
-            "Preview Send validates placeholders and output before queueing.",
+            "Preview Send validates placeholders and output before sending.",
             "Imports are validated before creating local template copies.",
         },
     },

@@ -63,11 +63,11 @@ local function getInactivityDays(player, now)
 end
 
 local function getLiveGuildCounts()
-    if not GetNumGuildMembers then
+    if not (GC.API and GC.API.GetNumGuildMembers) then
         return nil, nil
     end
 
-    local total, online = GetNumGuildMembers()
+    local total, online = GC.API.GetNumGuildMembers()
     return tonumber(total), tonumber(online)
 end
 

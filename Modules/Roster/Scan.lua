@@ -20,7 +20,7 @@ function GC.Modules.RosterScan:Capture()
 
     GC.API.SetGuildRosterShowOffline(true)
 
-    local totalMembers = GetNumGuildMembers()
+    local totalMembers = GC.API.GetNumGuildMembers()
     local totalRanks = GetNumGuildRanks and GetNumGuildRanks() or nil
     for index = 1, totalMembers do
         local fullName, rankName, rankIndex, level, classDisplayName, zone, publicNote, officerNote, isOnline, status, classFileName, achievementPoints, achievementRank, isMobile, canSoR, reputation, yearsOffline, monthsOffline, daysOffline, hoursOffline, guid = GC.API.GetGuildRosterInfo(index)

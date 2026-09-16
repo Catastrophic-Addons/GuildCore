@@ -67,6 +67,7 @@ function I:GetQueue()
             text            = tostring(queueEntry.text or ""),
             target          = tostring(queueEntry.target or "GUILD"),
             recipient       = queueEntry.recipient,
+            publicChannel   = queueEntry.publicChannel,
             sourceMessageId = queueEntry.sourceMessageId,
             queuedAt        = queueEntry.queuedAt,
         }
@@ -107,6 +108,8 @@ function I:ValidateQueueEntry(entry)
     local text
     local target = "GUILD"
     local recipient
+    local publicChannel
+    local publicChannelNumber
     local channelOptions
 
     if type(entry) == "table" then
@@ -114,6 +117,7 @@ function I:ValidateQueueEntry(entry)
         local ok, err, _, normalizedOptions = self:ValidateChannelOptions({
             target    = entry.target or "GUILD",
             recipient = entry.recipient,
+            publicChannel = entry.publicChannel,
         })
         if not ok then
             return false, err or "Queued message has an invalid target channel."
@@ -121,6 +125,8 @@ function I:ValidateQueueEntry(entry)
         channelOptions = normalizedOptions
         target    = normalizedOptions.target
         recipient = normalizedOptions.recipient
+        publicChannel = normalizedOptions.publicChannel
+        publicChannelNumber = normalizedOptions.publicChannelNumber
     else
         text = trim(entry or "")
         local ok, err, _, normalizedOptions = self:ValidateChannelOptions({ target = "GUILD" })
@@ -138,6 +144,8 @@ function I:ValidateQueueEntry(entry)
         text          = text,
         target        = target,
         recipient     = recipient,
+        publicChannel = publicChannel,
+        publicChannelNumber = publicChannelNumber,
         channelOptions = channelOptions,
     }
 end
@@ -225,13 +233,14 @@ function I:QueueChunks(chunks, options)
 
     local target    = channelOptions.target
     local recipient = channelOptions.recipient
+    local publicChannel = channelOptions.publicChannel
     local pending   = {}
     for _, chunk in ipairs(chunks or {}) do
         local text = type(chunk) == "table" and chunk.text or chunk
         text = trim(text)
         if text ~= "" then
             local parts = { text }
-            if target == "GUILD" and #text > 255 then
+            if #text > 255 then
                 parts = self:SplitMessage(text, 255)
             end
             for _, part in ipairs(parts) do
@@ -241,6 +250,7 @@ function I:QueueChunks(chunks, options)
                         text            = part,
                         target          = target,
                         recipient       = recipient,
+                        publicChannel   = publicChannel,
                         sourceMessageId = options.sourceMessageId,
                         queuedAt        = now(),
                     }
@@ -324,34 +334,33 @@ end
 function I:DirectSendMessage(messageId, options)
     local payload, err = self:BuildMessagePreview(messageId, options)
     if not payload then return false, err end
+    options = options or {}
 
-    local ok, queueErr = self:QueueChunks(payload.preview, {
-        target          = options and options.target or "GUILD",
-        recipient       = options and options.recipient or nil,
+    local ok, sendErr, result = self:SendChunksNow(payload.preview, {
+        target          = options.target or payload.message.targetChannel or "GUILD",
+        recipient       = options.recipient,
+        publicChannel   = options.publicChannel or payload.message.targetChannelName,
         sourceMessageId = messageId,
     })
-    if not ok then return false, queueErr end
-
-    local autoStarted = false
-    if self:GetAutomationEnabled() then
-        local started = self:StartAutoSend()
-        autoStarted = started == true or self:IsAutoSending()
-    end
+    if not ok then return false, sendErr end
 
     return true, nil, {
         preview      = payload.preview,
         resolvedBody = payload.resolvedBody,
-        autoStarted  = autoStarted,
+        chunkCount   = result and result.chunkCount or #payload.preview,
+        paced        = result and result.paced == true or false,
     }
 end
 
 function I:QueueMessagePreview(messageId, options)
     local payload, err = self:BuildMessagePreview(messageId, options)
     if not payload then return false, err end
+    options = options or {}
 
     return self:QueueChunks(payload.preview, {
-        target          = options and options.target or "GUILD",
-        recipient       = options and options.recipient or nil,
+        target          = options.target or payload.message.targetChannel or "GUILD",
+        recipient       = options.recipient,
+        publicChannel   = options.publicChannel or payload.message.targetChannelName,
         sourceMessageId = messageId,
     })
 end
@@ -371,7 +380,9 @@ function I:LoadChunkIntoChat(text, target, recipient)
     if not ok then return false, err end
 
     local prefix = channel.chatPrefix or channel.slashPrefix or "/g "
-    if channelOptions.recipient then
+    if channelOptions.target == "CHANNEL" then
+        prefix = "/" .. tostring(channelOptions.publicChannelNumber) .. " "
+    elseif channelOptions.recipient then
         prefix = prefix .. channelOptions.recipient .. " "
     end
 
@@ -414,6 +425,8 @@ function I:SendNextQueuedMessage()
     local ok, err
     if normalized.target == "GUILD" then
         ok, err = self:SendGuildChunk(normalized.text)
+    elseif normalized.target == "CHANNEL" then
+        ok, err = self:SendPublicChannelChunk(normalized.text, normalized.publicChannelNumber)
     else
         ok, err = pcall(SendChatMessage, normalized.text, normalized.target, nil, normalized.recipient)
     end
@@ -427,6 +440,7 @@ function I:SendNextQueuedMessage()
         self:RecordMessageUsage(nextEntry.sourceMessageId, {
             target     = normalized.target,
             recipient  = normalized.recipient,
+            publicChannel = normalized.publicChannel,
             sentAt     = now(),
             chunkCount = tonumber(nextEntry.chunkCount) or 1,
         })
@@ -443,6 +457,84 @@ function I:SendGuildChunk(chunk)
     local ok, err = pcall(SendChatMessage, chunk, "GUILD")
     if not ok then return false, tostring(err) end
     return true
+end
+
+function I:SendPublicChannelChunk(chunk, channelNumber)
+    chunk = trim(chunk)
+    channelNumber = tonumber(channelNumber)
+    if chunk == "" then return false, "Public channel message is empty." end
+    if #chunk > 255 then return false, "Public channel message exceeds 255 characters." end
+    if not channelNumber or channelNumber <= 0 then return false, "Enter a channel number, such as /12." end
+    if not SendChatMessage then return false, "SendChatMessage is unavailable." end
+
+    local ok, err = pcall(SendChatMessage, chunk, "CHANNEL", nil, math.floor(channelNumber))
+    if not ok then return false, tostring(err) end
+    return true
+end
+
+function I:SendChunksNow(chunks, options)
+    if not self:IsEnabled() then
+        return false, "Messaging module is disabled."
+    end
+
+    options = options or {}
+    local valid, validationErr, _, channelOptions = self:ValidateChannelOptions(options)
+    if not valid then return false, validationErr end
+
+    local pending = {}
+    for _, chunk in ipairs(chunks or {}) do
+        local text = trim(type(chunk) == "table" and chunk.text or chunk)
+        local parts = #text > 255 and self:SplitMessage(text, 255) or { text }
+        for _, part in ipairs(parts) do
+            part = trim(part)
+            if part ~= "" then pending[#pending + 1] = part end
+        end
+    end
+    if #pending == 0 then return false, "Message is empty." end
+
+    local function sendPart(text)
+        if channelOptions.target == "GUILD" then
+            return self:SendGuildChunk(text)
+        elseif channelOptions.target == "CHANNEL" then
+            return self:SendPublicChannelChunk(text, channelOptions.publicChannelNumber)
+        end
+        if not SendChatMessage then return false, "SendChatMessage is unavailable." end
+        local ok, err = pcall(SendChatMessage, text, channelOptions.target, nil, channelOptions.recipient)
+        if not ok then return false, tostring(err) end
+        return true
+    end
+
+    -- Send every line while the Send button's hardware event is still active.
+    -- Timer-delayed follow-ups can lose that protected user-action context and
+    -- leave only the first line delivered on current Retail clients.
+    -- Retail processes multiple chat submissions made during one hardware
+    -- event in reverse order. Submit bottom-to-top so chat displays the
+    -- message in the same top-to-bottom order shown in the preview.
+    for index = #pending, 1, -1 do
+        local text = pending[index]
+        local ok, err = sendPart(text)
+        if not ok then
+            return false, string.format(
+                "Message %d of %d could not be sent: %s",
+                index,
+                #pending,
+                tostring(err or "Unable to send message.")
+            )
+        end
+    end
+
+    self._lastSendAt = GetTime and GetTime() or nil
+    if options.sourceMessageId then
+        self:RecordMessageUsage(options.sourceMessageId, {
+            target        = channelOptions.target,
+            recipient     = channelOptions.recipient,
+            publicChannel = channelOptions.publicChannel,
+            sentAt        = now(),
+            chunkCount    = #pending,
+        })
+    end
+
+    return true, nil, { chunkCount = #pending, paced = false }
 end
 
 function I:ProcessQueue()

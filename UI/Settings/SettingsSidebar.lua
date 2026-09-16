@@ -19,8 +19,8 @@ function Sidebar:Build(parent)
             btn:SetPoint("TOPRIGHT", parent, "TOPRIGHT", -6, y)
             btn:SetHeight(30)
             btn._id = id
-            btn._bg = btn:CreateTexture(nil, "BACKGROUND")
-            btn._bg:SetAllPoints()
+            local pc = T().c.panelAlt
+            btn._bg = T().RoundedSurface(btn, pc, nil, 6, "BACKGROUND", -8)
             local label = T().Fs(btn, "body", def.label, "textSecond")
             label:SetPoint("LEFT", btn, "LEFT", 10, 0)
             btn._label = label

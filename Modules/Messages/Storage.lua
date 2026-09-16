@@ -296,6 +296,8 @@ function I:ValidateStorage(storage)
             message.lastUsedAt = tonumber(message.lastUsedAt) or nil
             -- NormalizeTargetChannel is defined in Service.lua; safe because ValidateStorage is only called at runtime
             message.targetChannel = self:NormalizeTargetChannel(message.targetChannel)
+            local channelName = trim(message.targetChannelName or "")
+            message.targetChannelName = channelName ~= "" and channelName or nil
             if type(message.tags) ~= "table" then message.tags = {} end
             message.usageCount = math.max(0, math.floor(tonumber(message.usageCount) or 0))
             local actor = H.currentPlayerName()

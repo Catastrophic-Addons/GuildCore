@@ -56,6 +56,13 @@ end
 
 GC.UI.ApplyInviteHotkeys = applyInviteHotkeys
 
+local INVITE_WORKFLOW_STEPS = {
+    { id = "discover", label = "Discover" },
+    { id = "review", label = "Review" },
+    { id = "queue", label = "Queue" },
+    { id = "invite", label = "Invite" },
+}
+
 local function trim(value)
     return tostring(value or ""):match("^%s*(.-)%s*$") or ""
 end
@@ -225,10 +232,8 @@ local function makeRealmDropdown(parent, width, onChange)
         optBtn:SetPoint("TOPRIGHT", menu, "TOPRIGHT", 0, -((index - 1) * itemH))
         optBtn._key = realm
 
-        local bg = optBtn:CreateTexture(nil, "BACKGROUND")
-        bg:SetAllPoints()
         local pc = Th.c.panel
-        bg:SetColorTexture(pc[1], pc[2], pc[3], pc[4] or 1)
+        local bg = Th.RoundedSurface(optBtn, pc, nil, 5, "BACKGROUND", -8)
         optBtn._bg = bg
 
         local fs = Th.Fs(optBtn, "body", realm, "textSecond")
@@ -411,9 +416,53 @@ function IP:Create(parent)
     sub:SetPoint("TOPRIGHT",  frame, "TOPRIGHT",    -P, -P)
     sub:SetHeight(20)
 
+    -- ── Workflow guide ───────────────────────────────────────────────────────
+    local workflowFrame = CreateFrame("Frame", nil, frame)
+    workflowFrame:SetPoint("TOPLEFT", hdr, "BOTTOMLEFT", 0, -rowGap)
+    workflowFrame:SetPoint("TOPRIGHT", frame, "TOPRIGHT", -P, 0)
+    workflowFrame:SetHeight(50)
+    Th.Bg(workflowFrame, Th.c.panelAlt, Th.c.border)
+    self.workflowFrame = workflowFrame
+    self.workflowSteps = {}
+
+    local stepW = 136
+    for index, step in ipairs(INVITE_WORKFLOW_STEPS) do
+        local stepFrame = CreateFrame("Frame", nil, workflowFrame)
+        stepFrame:SetSize(stepW, 28)
+        stepFrame:SetPoint("TOPLEFT", workflowFrame, "TOPLEFT", 12 + (index - 1) * (stepW + 18), -8)
+
+        local dot = stepFrame:CreateTexture(nil, "ARTWORK")
+        dot:SetSize(10, 10)
+        dot:SetPoint("LEFT", stepFrame, "LEFT", 0, 0)
+
+        local label = Th.Fs(stepFrame, "data", tostring(index) .. ". " .. step.label, "textDimmed")
+        label:SetPoint("LEFT", dot, "RIGHT", 8, 0)
+        label:SetPoint("RIGHT", stepFrame, "RIGHT", 0, 0)
+        label:SetJustifyH("LEFT")
+
+        self.workflowSteps[step.id] = {
+            frame = stepFrame,
+            dot = dot,
+            label = label,
+            index = index,
+        }
+    end
+
+    local workflowHint = Th.Fs(workflowFrame, "tiny", "", "textDimmed")
+    workflowHint:SetPoint("TOPRIGHT", workflowFrame, "TOPRIGHT", -12, -9)
+    workflowHint:SetWidth(260)
+    workflowHint:SetJustifyH("RIGHT")
+    self.workflowHint = workflowHint
+
+    local safetyCue = Th.Fs(workflowFrame, "tiny", "", "textDimmed")
+    safetyCue:SetPoint("TOPRIGHT", workflowHint, "BOTTOMRIGHT", 0, -4)
+    safetyCue:SetWidth(360)
+    safetyCue:SetJustifyH("RIGHT")
+    self.safetyCue = safetyCue
+
     -- ── Module-disabled notice (hidden by default) ───────────────────────────
     local noticeFrame = CreateFrame("Frame", nil, frame)
-    noticeFrame:SetPoint("TOPLEFT",  hdr,   "BOTTOMLEFT",  0,  -rowGap)
+    noticeFrame:SetPoint("TOPLEFT",  workflowFrame, "BOTTOMLEFT",  0,  -rowGap)
     noticeFrame:SetPoint("TOPRIGHT", frame, "TOPRIGHT",   -P,  0)
     noticeFrame:SetHeight(24)
     Th.Bg(noticeFrame, Th.c.panelAlt or Th.c.chrome, Th.c.borderAccent or Th.c.border)
@@ -428,7 +477,7 @@ function IP:Create(parent)
     -- ── Control row ──────────────────────────────────────────────────────────
     -- Anchored below header (notice is hidden by default; Refresh shows it)
     local ctrlRow = CreateFrame("Frame", nil, frame)
-    ctrlRow:SetPoint("TOPLEFT",  hdr,   "BOTTOMLEFT",  0,  -rowGap)
+    ctrlRow:SetPoint("TOPLEFT",  workflowFrame, "BOTTOMLEFT",  0,  -rowGap)
     ctrlRow:SetPoint("TOPRIGHT", frame, "TOPRIGHT",   -P,  0)
     ctrlRow:SetHeight(btnH)
     self._ctrlRow = ctrlRow
@@ -462,10 +511,10 @@ function IP:Create(parent)
 
     local inviteSelectedBtn = GC.UI.Button.Create(ctrlRow, "Invite Selected", "secondary", 116, btnH)
     inviteSelectedBtn:SetPoint("LEFT", refreshStatusBtn, "RIGHT", 6, 0)
-    inviteSelectedBtn:SetTooltip("Invite Selected", "Feature in progress. Batch invites are under development.")
+    inviteSelectedBtn:SetTooltip("Invite Selected", "Starts a dry run for selected candidates. Live invites use Invite Next.")
     self.inviteSelectedBtn = inviteSelectedBtn
 
-    local inviteNowBtn = GC.UI.Button.Create(ctrlRow, "INVITE NEXT", "success", 148, btnH + 8)
+    local inviteNowBtn = GC.UI.Button.Create(ctrlRow, "Invite Next", "success", 136, btnH + 8)
     inviteNowBtn:SetPoint("RIGHT", ctrlRow, "RIGHT", 0, 0)
     inviteNowBtn:SetTooltip("Invite Next", "Immediately sends one selected eligible guild invite. Hotkey can be changed in Settings.")
     self.inviteNowBtn = inviteNowBtn
@@ -478,7 +527,7 @@ function IP:Create(parent)
 
     local startQueueBtn = GC.UI.Button.Create(ctrlRow, "Start Queue", "primary", 88, btnH)
     startQueueBtn:SetPoint("LEFT", queueAllBtn, "RIGHT", 10, 0)
-    startQueueBtn:SetTooltip("Start Queue", "Begins dry-run processing.")
+    startQueueBtn:SetTooltip("Start Queue", "Begins dry-run processing for queued candidates.")
     self.startQueueBtn = startQueueBtn
 
     local pauseBtn = GC.UI.Button.Create(ctrlRow, "Pause", "secondary", 58, btnH)
@@ -571,6 +620,25 @@ function IP:Create(parent)
     realmSelect:SetPoint("TOPLEFT", realmLabel, "TOPRIGHT", 6, 0)
     self.realmSelect = realmSelect
 
+    local realmScopeLabel = Th.Fs(realmRow, "tiny", "Realm Scope", "textDimmed")
+    realmScopeLabel:SetPoint("LEFT", realmSelect, "RIGHT", 18, 0)
+    realmScopeLabel:SetWidth(68)
+
+    local guildRealmScopeBtn = GC.UI.Button.Create(realmRow, "Guild Realm", "secondary", 88, btnH)
+    guildRealmScopeBtn:SetPoint("LEFT", realmScopeLabel, "RIGHT", 4, 0)
+    guildRealmScopeBtn:SetTooltip("Guild Realm", "Only keeps WHO results from the selected guild realm.")
+    self.guildRealmScopeBtn = guildRealmScopeBtn
+
+    local connectedRealmScopeBtn = GC.UI.Button.Create(realmRow, "Connected", "secondary", 82, btnH)
+    connectedRealmScopeBtn:SetPoint("LEFT", guildRealmScopeBtn, "RIGHT", 4, 0)
+    connectedRealmScopeBtn:SetTooltip("Connected Realms", "Keeps results from the guild realm and its connected realm group.")
+    self.connectedRealmScopeBtn = connectedRealmScopeBtn
+
+    local allRealmScopeBtn = GC.UI.Button.Create(realmRow, "All Available", "secondary", 96, btnH)
+    allRealmScopeBtn:SetPoint("LEFT", connectedRealmScopeBtn, "RIGHT", 4, 0)
+    allRealmScopeBtn:SetTooltip("All Available Realms", "Keeps every realm returned by Blizzard WHO. This does not guarantee a complete all-realm directory.")
+    self.allRealmScopeBtn = allRealmScopeBtn
+
     -- Line 2: realm info text, sits 6px below line 1
     local realmInfoFs = Th.Fs(realmRow, "small", "", "textSecond")
     realmInfoFs:SetPoint("TOPLEFT",  realmRow, "TOPLEFT",  0, -(line1H + 6))
@@ -579,16 +647,35 @@ function IP:Create(parent)
     realmInfoFs:SetJustifyH("LEFT")
     self.realmInfoFs = realmInfoFs
 
-    -- ── Filter strip ─────────────────────────────────────────────────────────
+    -- ── Scan scope ───────────────────────────────────────────────────────────
     local filterRow = CreateFrame("Frame", nil, frame)
     filterRow:SetPoint("TOPLEFT",  realmRow, "BOTTOMLEFT",  0, -rowGap)
     filterRow:SetPoint("TOPRIGHT", frame,   "TOPRIGHT",   -P, 0)
     filterRow:SetHeight(inputH)
     self._filterRow = filterRow
 
-    local lvlLabel = Th.Fs(filterRow, "tiny", "Level", "textDimmed")
-    lvlLabel:SetPoint("LEFT", filterRow, "LEFT", 0, 0)
-    lvlLabel:SetWidth(30)
+    local scopeLabel = Th.Fs(filterRow, "tiny", "Scan Scope", "textDimmed")
+    scopeLabel:SetPoint("LEFT", filterRow, "LEFT", 0, 0)
+    scopeLabel:SetWidth(66)
+
+    local focusedScopeBtn = GC.UI.Button.Create(filterRow, "Focused", "secondary", 76, btnH)
+    focusedScopeBtn:SetPoint("LEFT", scopeLabel, "RIGHT", 4, 0)
+    focusedScopeBtn:SetTooltip("Focused Scan", "Searches the highest 20 levels for a faster recruitment pass.")
+    self.focusedScopeBtn = focusedScopeBtn
+
+    local allScopeBtn = GC.UI.Button.Create(filterRow, "All Levels", "secondary", 82, btnH)
+    allScopeBtn:SetPoint("LEFT", focusedScopeBtn, "RIGHT", 4, 0)
+    allScopeBtn:SetTooltip("All Levels", "Searches every available level and may require more scan steps.")
+    self.allScopeBtn = allScopeBtn
+
+    local customScopeBtn = GC.UI.Button.Create(filterRow, "Custom", "secondary", 70, btnH)
+    customScopeBtn:SetPoint("LEFT", allScopeBtn, "RIGHT", 4, 0)
+    customScopeBtn:SetTooltip("Custom Range", "Uses the minimum and maximum level entered here.")
+    self.customScopeBtn = customScopeBtn
+
+    local lvlLabel = Th.Fs(filterRow, "tiny", "Levels", "textDimmed")
+    lvlLabel:SetPoint("LEFT", customScopeBtn, "RIGHT", 16, 0)
+    lvlLabel:SetWidth(36)
 
     local lvlMinBox = GC.UI.Panel.Input(filterRow, 38, inputH)
     lvlMinBox:SetPoint("LEFT", lvlLabel, "RIGHT", 4, 0)
@@ -605,55 +692,14 @@ function IP:Create(parent)
     lvlMaxBox:SetNumeric(true)
     self.lvlMaxBox = lvlMaxBox
 
-    local guildlessLabel = Th.Fs(filterRow, "tiny", "Guildless Only", "textDimmed")
-    guildlessLabel:SetPoint("LEFT", lvlMaxBox, "RIGHT", 14, 0)
-
-    local guildlessToggle = GC.UI.Button.Create(filterRow, "On", "secondary", 40, btnH)
-    guildlessToggle:SetPoint("LEFT", guildlessLabel, "RIGHT", 4, 0)
-    self.guildlessToggle = guildlessToggle
-
-    local exclRecentLabel = Th.Fs(filterRow, "tiny", "Excl. Recent", "textDimmed")
-    exclRecentLabel:SetPoint("LEFT", guildlessToggle, "RIGHT", 14, 0)
-
-    local exclRecentToggle = GC.UI.Button.Create(filterRow, "On", "secondary", 40, btnH)
-    exclRecentToggle:SetPoint("LEFT", exclRecentLabel, "RIGHT", 4, 0)
-    self.exclRecentToggle = exclRecentToggle
-
-    local zoneLabel = Th.Fs(filterRow, "tiny", "Zone Contains", "textDimmed")
-    zoneLabel:SetPoint("LEFT", exclRecentToggle, "RIGHT", 14, 0)
-
-    local zoneBox = GC.UI.Panel.Input(filterRow, 130, inputH)
-    zoneBox:SetPoint("LEFT", zoneLabel, "RIGHT", 4, 0)
-    zoneBox:SetMaxLetters(64)
-    self.zoneBox = zoneBox
-
-    local applyFiltersBtn = GC.UI.Button.Create(filterRow, "Apply Filters", "secondary", 96, btnH)
-    applyFiltersBtn:SetPoint("LEFT", zoneBox, "RIGHT", 8, 0)
+    local applyFiltersBtn = GC.UI.Button.Create(filterRow, "Apply", "secondary", 68, btnH)
+    applyFiltersBtn:SetPoint("LEFT", lvlMaxBox, "RIGHT", 8, 0)
+    applyFiltersBtn:SetTooltip("Apply Range", "Applies the custom level range and starts a fresh scan on the next click.")
     self.applyFiltersBtn = applyFiltersBtn
-
-    local connectedLabel = Th.Fs(filterRow, "tiny", "Connected Realms", "textDimmed")
-    connectedLabel:SetPoint("LEFT", applyFiltersBtn, "RIGHT", 14, 0)
-
-    local connectedToggle = GC.UI.Button.Create(filterRow, "On", "secondary", 40, btnH)
-    connectedToggle:SetPoint("LEFT", connectedLabel, "RIGHT", 4, 0)
-    self.connectedToggle = connectedToggle
-    connectedToggle:SetTooltip("Include Connected Realms",
-        "When ON, scans all realms connected to the guild's home realm. Turn OFF to scan home realm only.")
-    connectedToggle:SetScript("OnClick", function()
-        local svc = SVC()
-        if not svc then return end
-        local settings = svc:GetSettings()
-        if settings then
-            settings.includeConnectedRealms = not (settings.includeConnectedRealms ~= false)
-        end
-        IP:_refreshFilterDisplay()
-    end)
-
-    filterRow:Hide()
 
     -- ── Status strip ─────────────────────────────────────────────────────────
     local statusBar = CreateFrame("Frame", nil, frame)
-    statusBar:SetPoint("TOPLEFT",  realmRow, "BOTTOMLEFT",  0, -rowGap)
+    statusBar:SetPoint("TOPLEFT",  filterRow, "BOTTOMLEFT",  0, -rowGap)
     statusBar:SetPoint("TOPRIGHT", frame,    "TOPRIGHT",   -P, 0)
     statusBar:SetHeight(24)
     Th.Bg(statusBar, Th.c.chrome)
@@ -663,7 +709,7 @@ function IP:Create(parent)
     scanStatusFs:SetWidth(420)
     self.scanStatusFs = scanStatusFs
 
-    local queueStatusFs = Th.Fs(statusBar, "data", "Queue: idle  queued=0  done=0", "textDimmed")
+    local queueStatusFs = Th.Fs(statusBar, "data", "Queue is idle.", "textDimmed")
     queueStatusFs:SetPoint("LEFT", statusBar, "LEFT", 440, 0)
     queueStatusFs:SetWidth(220)
     self.queueStatusFs = queueStatusFs
@@ -734,6 +780,15 @@ function IP:Create(parent)
         IP:_doScan()
     end)
 
+    stopScanBtn:SetScript("OnClick", function()
+        local scanner = IS()
+        if scanner and scanner.StopScan then
+            scanner:StopScan("stopped-by-user")
+            GC.UI.MainFrame:SetStatus("Invite scan stopped.", "textWarn")
+            IP:UpdateStatus()
+        end
+    end)
+
     queueSelBtn:SetScript("OnClick", function()
         IP:_selectAll()
     end)
@@ -751,7 +806,23 @@ function IP:Create(parent)
     end)
 
     inviteSelectedBtn:SetScript("OnClick", function()
-        GC.UI.MainFrame:SetStatus("Invite Selected is under development. Use Invite Next for direct invites.", "textWarn")
+        IP:_inviteSelected()
+    end)
+
+    queueAllBtn:SetScript("OnClick", function()
+        IP:_queueAllEligible()
+    end)
+
+    startQueueBtn:SetScript("OnClick", function()
+        IP:_startQueuedDryRun()
+    end)
+
+    pauseBtn:SetScript("OnClick", function()
+        IP:_toggleQueuePaused()
+    end)
+
+    cancelQueueBtn:SetScript("OnClick", function()
+        IP:_cancelQueue()
     end)
 
     dryRunBtn:SetScript("OnClick", function()
@@ -795,6 +866,60 @@ function IP:Create(parent)
     end)
     showDeclinedBtn:SetScript("OnClick", function()
         toggleVisibilitySetting("showRecentlyDeclinedCandidates")
+    end)
+
+    local function setRealmScope(scope)
+        local svc = SVC()
+        local settings = svc and svc:GetSettings()
+        if not settings then return end
+
+        settings.realmScope = scope
+        settings.includeConnectedRealms = scope ~= "guild"
+
+        local scanner = IS()
+        if scanner and scanner.ClearCandidates then scanner:ClearCandidates() end
+        if scanner and scanner.ClearScan then scanner:ClearScan() end
+        local queue = IQ()
+        if queue and queue.Clear then queue:Clear() end
+        IP:_refreshFilterDisplay()
+        IP:UpdateStatus()
+    end
+
+    guildRealmScopeBtn:SetScript("OnClick", function() setRealmScope("guild") end)
+    connectedRealmScopeBtn:SetScript("OnClick", function() setRealmScope("connected") end)
+    allRealmScopeBtn:SetScript("OnClick", function() setRealmScope("all") end)
+
+    local function setScanScope(scope)
+        local svc = SVC()
+        local settings = svc and svc:GetSettings()
+        if not settings then return end
+
+        local maxLevel = maxPlayerLevel()
+        settings.scanScope = scope
+        if scope == "focused" then
+            settings.scanLevelMin = math.max(1, maxLevel - 20)
+            settings.scanLevelMax = maxLevel
+        elseif scope == "all" then
+            settings.scanLevelMin = 1
+            settings.scanLevelMax = maxLevel
+        end
+        settings.levelMin = settings.scanLevelMin
+        settings.levelMax = settings.scanLevelMax
+
+        local scanner = IS()
+        if scanner and scanner.ClearScan then scanner:ClearScan() end
+        IP:_refreshFilterDisplay()
+        IP:UpdateStatus()
+    end
+
+    focusedScopeBtn:SetScript("OnClick", function() setScanScope("focused") end)
+    allScopeBtn:SetScript("OnClick", function() setScanScope("all") end)
+    customScopeBtn:SetScript("OnClick", function() setScanScope("custom") end)
+    applyFiltersBtn:SetScript("OnClick", function()
+        setScanScope("custom")
+        IP:_applyFilterInputs()
+        IP:_refreshFilterDisplay()
+        IP:UpdateStatus()
     end)
 end
 
@@ -849,9 +974,46 @@ function IP:_inviteSelected()
     local q = IQ()
     local scanner = IS()
     if not q or not scanner then return end
+    if not self:_isDryRun() then
+        GC.UI.MainFrame:SetStatus("Batch live invites are disabled here. Turn Dry Run on, or use Invite Next for one live invite.", "textWarn")
+        return
+    end
     local candidates = scanner:GetCandidates()
-    local ok, err = q:StartSelected(candidates, self:_isDryRun())
-    GC.UI.MainFrame:SetStatus(ok and "Invite selected started." or (err or "Unable to invite selected."), ok and "textSuccess" or "textWarn")
+    local ok, err = q:StartSelected(candidates, true)
+    GC.UI.MainFrame:SetStatus(ok and "Dry run started for selected candidates." or (err or "Unable to start dry run."), ok and "textSuccess" or "textWarn")
+    self:UpdateStatus()
+end
+
+function IP:_startQueuedDryRun()
+    local q = IQ()
+    if not q then return end
+    if not self:_isDryRun() then
+        GC.UI.MainFrame:SetStatus("Start Queue only runs dry runs. Turn Dry Run on to continue.", "textWarn")
+        return
+    end
+    local ok, err = q:StartDryRun()
+    GC.UI.MainFrame:SetStatus(ok and "Dry run queue started." or (err or "Unable to start queue."), ok and "textSuccess" or "textWarn")
+    self:UpdateStatus()
+end
+
+function IP:_toggleQueuePaused()
+    local q = IQ()
+    if not q then return end
+    if q:IsPaused() then
+        q:Resume()
+        GC.UI.MainFrame:SetStatus("Invite queue resumed.", "textSuccess")
+    elseif q:IsRunning() then
+        q:Pause()
+        GC.UI.MainFrame:SetStatus("Invite queue paused.", "textWarn")
+    end
+    self:UpdateStatus()
+end
+
+function IP:_cancelQueue()
+    local q = IQ()
+    if not q then return end
+    q:Cancel()
+    GC.UI.MainFrame:SetStatus("Invite queue cancelled.", "textWarn")
     self:UpdateStatus()
 end
 
@@ -890,11 +1052,20 @@ function IP:_enforceSafeInviteSettings()
     if not settings then return end
     settings.guildlessOnly = true
     settings.excludeRecentlyInvited = true
-    settings.includeConnectedRealms = true
-    if settings.levelMin == nil then settings.levelMin = 1 end
-    if settings.levelMax == nil then settings.levelMax = maxPlayerLevel() end
-    if settings.scanLevelMin == nil then settings.scanLevelMin = 1 end
-    if settings.scanLevelMax == nil then settings.scanLevelMax = maxPlayerLevel() end
+    if settings.realmScope == nil then
+        settings.realmScope = settings.includeConnectedRealms == false and "guild" or "connected"
+    end
+    if settings.scanScope == nil then
+        settings.scanScope = "focused"
+        settings.scanLevelMin = math.max(1, maxPlayerLevel() - 20)
+        settings.scanLevelMax = maxPlayerLevel()
+        settings.levelMin = settings.scanLevelMin
+        settings.levelMax = settings.scanLevelMax
+    end
+    if settings.levelMin == nil then settings.levelMin = settings.scanLevelMin or 1 end
+    if settings.levelMax == nil then settings.levelMax = settings.scanLevelMax or maxPlayerLevel() end
+    if settings.scanLevelMin == nil then settings.scanLevelMin = settings.levelMin end
+    if settings.scanLevelMax == nil then settings.scanLevelMax = settings.levelMax end
     if settings.debugEnabled == nil then settings.debugEnabled = false end
     if settings.showGuildedCandidates == nil then settings.showGuildedCandidates = false end
     if settings.showRecentlyInvitedCandidates == nil then settings.showRecentlyInvitedCandidates = false end
@@ -1101,6 +1272,9 @@ function IP:_applyFilterInputs()
     if maxText ~= "" then
         settings.levelMax = math.max(settings.levelMin or 1, tonumber(maxText) or settings.levelMax or maxPlayerLevel())
     end
+    settings.scanScope = "custom"
+    settings.scanLevelMin = settings.levelMin
+    settings.scanLevelMax = settings.levelMax
     settings.zoneIncludes = zoneText ~= "" and {zoneText} or {}
 end
 
@@ -1108,6 +1282,11 @@ function IP:_refreshFilterDisplay()
     self:_enforceSafeInviteSettings()
     local svc = SVC()
     local settings = svc and svc:GetSettings() or {}
+
+    local scope = settings.scanScope or "focused"
+    if self.focusedScopeBtn then self.focusedScopeBtn:SetActive(scope == "focused") end
+    if self.allScopeBtn then self.allScopeBtn:SetActive(scope == "all") end
+    if self.customScopeBtn then self.customScopeBtn:SetActive(scope == "custom") end
 
     if self.guildlessToggle then
         local isOn = settings.guildlessOnly ~= false
@@ -1121,11 +1300,17 @@ function IP:_refreshFilterDisplay()
         local isOn = settings.includeConnectedRealms ~= false
         self.connectedToggle:SetLabel(isOn and "On" or "Off")
     end
+    local realmScope = settings.realmScope or "connected"
+    if self.guildRealmScopeBtn then self.guildRealmScopeBtn:SetActive(realmScope == "guild") end
+    if self.connectedRealmScopeBtn then self.connectedRealmScopeBtn:SetActive(realmScope == "connected") end
+    if self.allRealmScopeBtn then self.allRealmScopeBtn:SetActive(realmScope == "all") end
     if self.lvlMinBox then
-        self.lvlMinBox:SetText(tostring(settings.levelMin or 1))
+        self.lvlMinBox:SetText(tostring(settings.scanLevelMin or settings.levelMin or 1))
+        if scope == "custom" then self.lvlMinBox:Enable() else self.lvlMinBox:Disable() end
     end
     if self.lvlMaxBox then
-        self.lvlMaxBox:SetText(tostring(settings.levelMax or maxPlayerLevel()))
+        self.lvlMaxBox:SetText(tostring(settings.scanLevelMax or settings.levelMax or maxPlayerLevel()))
+        if scope == "custom" then self.lvlMaxBox:Enable() else self.lvlMaxBox:Disable() end
     end
     if self.dryRunBtn then
         self.dryRunBtn:SetLabel((settings.dryRun ~= false) and "Dry Run: On" or "Dry Run: Off")
@@ -1161,13 +1346,23 @@ function IP:_refreshRealmDisplay()
     local guildRealm = info and info.anchor or override or "unknown"
     local suffix = override and " (selected)" or ""
     local realms = info and info.scanRealms or {}
-    local connected = #realms > 0 and table.concat(realms, ", ") or "unknown"
-    self.realmInfoFs:SetText(string.format(
-        "Guild Realm: %s%s   Connected Realms: %s",
-        tostring(guildRealm),
-        suffix,
-        connected
-    ))
+    if info and info.allRealms == true then
+        self.realmInfoFs:SetText(string.format(
+            "Guild Realm: %s%s   Scope: all realms Blizzard returns for each WHO query",
+            tostring(guildRealm),
+            suffix
+        ))
+    else
+        local scopeLabel = info and info.realmScope == "guild" and "Guild Realm" or "Connected Realms"
+        local realmList = #realms > 0 and table.concat(realms, ", ") or "unknown"
+        self.realmInfoFs:SetText(string.format(
+            "Guild Realm: %s%s   %s: %s",
+            tostring(guildRealm),
+            suffix,
+            scopeLabel,
+            realmList
+        ))
+    end
 end
 
 function IP:_refilterCandidates()
@@ -1230,7 +1425,15 @@ function IP:_updateButtons()
     end
     local scanStatus = scanner and scanner.GetScanStatus and scanner:GetScanStatus() or nil
 
-    if self.scanBtn     then self.scanBtn:SetEnabled(not scanning)      end
+    if self.scanBtn then
+        self.scanBtn:SetEnabled(not scanning)
+        self.scanBtn:SetShown(not scanning)
+    end
+    if self.stopScanBtn then
+        self.stopScanBtn:SetShown(scanning)
+        self.stopScanBtn:ClearAllPoints()
+        self.stopScanBtn:SetPoint("LEFT", self._ctrlRow, "LEFT", 0, 0)
+    end
     if self.scanBtn and self.scanBtn.SetLabel then
         if scanning then
             self.scanBtn:SetLabel("Scanning...")
@@ -1245,6 +1448,7 @@ function IP:_updateButtons()
 
     if self.queueSelBtn then
         self.queueSelBtn:SetEnabled(visibleActionable > 0 and qStatus ~= "running")
+        self.queueSelBtn:SetShown(not scanning and visibleActionable > 0 and qStatus ~= "running")
     end
     if self.queueAllBtn then
         self.queueAllBtn:SetEnabled(qStatus ~= "running")
@@ -1252,6 +1456,7 @@ function IP:_updateButtons()
 
     if self.startQueueBtn then
         self.startQueueBtn:SetEnabled(qLen > 0 and qStatus ~= "running")
+        self.startQueueBtn:SetShown(not scanning and qLen > 0 and qStatus ~= "running" and self:_isDryRun())
     end
     if self.pauseBtn then
         local canPauseResume = qStatus == "running" or qStatus == "paused"
@@ -1259,21 +1464,113 @@ function IP:_updateButtons()
         if self.pauseBtn.SetLabel then
             self.pauseBtn:SetLabel(qStatus == "paused" and "Resume" or "Pause")
         end
+        self.pauseBtn:SetShown(not scanning and canPauseResume)
     end
     if self.cancelQueueBtn then
         self.cancelQueueBtn:SetEnabled(qLen > 0 or qStatus ~= "idle")
+        self.cancelQueueBtn:SetShown(not scanning and (qLen > 0 or qStatus ~= "idle"))
     end
     if self.clearQueueBtn then
         self.clearQueueBtn:SetEnabled(stats.selected > 0 and qStatus ~= "running")
+        self.clearQueueBtn:SetShown(not scanning and stats.selected > 0 and qStatus ~= "running")
     end
     if self.refreshStatusBtn then
         self.refreshStatusBtn:SetEnabled(#candidates > 0)
+        self.refreshStatusBtn:SetShown(not scanning and #candidates > 0)
     end
     if self.inviteNowBtn then
         self.inviteNowBtn:SetEnabled(hasSelectedEligible and qStatus ~= "running")
+        self.inviteNowBtn:SetShown(not scanning and hasSelectedEligible and qStatus ~= "running")
     end
     if self.inviteSelectedBtn then
-        self.inviteSelectedBtn:SetEnabled(true)
+        self.inviteSelectedBtn:SetEnabled(hasSelectedEligible and self:_isDryRun() and qStatus ~= "running")
+        self.inviteSelectedBtn:SetShown(not scanning and hasSelectedEligible and self:_isDryRun() and qStatus ~= "running")
+    end
+
+
+    local previous = scanning and self.stopScanBtn or self.scanBtn
+    for _, button in ipairs({ self.queueSelBtn, self.clearQueueBtn, self.refreshStatusBtn, self.inviteSelectedBtn, self.startQueueBtn, self.pauseBtn, self.cancelQueueBtn }) do
+        if button and button:IsShown() then
+            button:ClearAllPoints()
+            button:SetPoint("LEFT", previous, "RIGHT", 8, 0)
+            previous = button
+        end
+    end
+end
+
+function IP:_refreshWorkflowGuide()
+    if not self.workflowSteps then return end
+    local Th = T()
+    local scanner = IS()
+    local queue = IQ()
+    local candidates = scanner and scanner:GetCandidates() or {}
+    local stats = self:_selectionStats(candidates)
+    local qStatus = queue and queue:GetStatus() or "idle"
+    local qLen = queue and #queue:GetItems() or 0
+    local scanning = scanner and scanner:IsScanning() or false
+    local scanStatus = scanner and scanner.GetScanStatus and scanner:GetScanStatus() or nil
+    local hasCandidates = #candidates > 0
+    local hasSelected = stats.eligibleSelected > 0
+    local hasQueue = qLen > 0 or qStatus == "running" or qStatus == "paused"
+    local canInvite, permissionReason = GC.Permissions:CanInviteGuild()
+    local dryRun = self:_isDryRun()
+    local completed = {
+        discover = hasCandidates or hasQueue,
+        review = hasSelected or hasQueue,
+        queue = hasQueue and qStatus ~= "running" and qStatus ~= "paused",
+    }
+
+    local activeStep = "discover"
+    local hint = "Scan to discover eligible candidates."
+    if scanning or (scanStatus and (scanStatus.pendingCount or 0) > 0) then
+        activeStep = "discover"
+        hint = "Discovery is running."
+    elseif hasQueue then
+        activeStep = "queue"
+        hint = qStatus == "running" and "Queue is processing." or "Queue is ready for review."
+    elseif hasSelected then
+        activeStep = "invite"
+        hint = "Invite Next will send one selected invite."
+    elseif hasCandidates then
+        activeStep = "review"
+        hint = "Review and select eligible candidates."
+    end
+
+    for _, def in ipairs(INVITE_WORKFLOW_STEPS) do
+        local step = self.workflowSteps[def.id]
+        if step then
+            local complete = completed[def.id] == true and def.id ~= activeStep
+            local active = def.id == activeStep
+            local c = active and Th.c.accent or complete and Th.c.statusActive or Th.c.textDimmed
+            step.dot:SetColorTexture(c[1], c[2], c[3], active and 1 or complete and 0.85 or 0.45)
+            step.label:SetTextColor(c[1], c[2], c[3], active and 1 or complete and 0.9 or 0.75)
+        end
+    end
+
+    if self.workflowHint then
+        self.workflowHint:SetText(hint)
+    end
+    if self.safetyCue then
+        local safetyText
+        local safetyColor
+        if not canInvite then
+            safetyText = permissionReason or "Safety: invite permission unavailable."
+            safetyColor = Th.c.textDanger
+        elseif qStatus == "running" then
+            safetyText = "Safety: queue running. Live invites still require explicit actions."
+            safetyColor = Th.c.textWarn
+        elseif dryRun then
+            safetyText = "Safety: dry run is on. Selected batches simulate only."
+            safetyColor = Th.c.statusActive
+        elseif hasSelected then
+            safetyText = "Safety: live Invite Next is armed for one selected candidate."
+            safetyColor = Th.c.textWarn
+        else
+            safetyText = "Safety: no live invite is armed."
+            safetyColor = Th.c.textDimmed
+        end
+        self.safetyCue:SetText(safetyText)
+        self.safetyCue:SetTextColor(safetyColor[1], safetyColor[2], safetyColor[3], safetyColor[4] or 1)
     end
 end
 
@@ -1336,10 +1633,15 @@ function IP:UpdateStatus()
             if item.status == "queued" then queued = queued + 1
             else done = done + 1 end
         end
-        self.queueStatusFs:SetText(string.format(
-            "Queue: %s  queued=%d  done=%d",
-            queue:GetStatus(), queued, done
-        ))
+        local statusLabel = queue:GetStatus() or "idle"
+        if queued == 0 and done == 0 then
+            self.queueStatusFs:SetText("Queue is " .. tostring(statusLabel) .. ".")
+        else
+            self.queueStatusFs:SetText(string.format(
+                "Queue is %s. %d waiting, %d complete.",
+                statusLabel, queued, done
+            ))
+        end
     end
 
     -- Permission note
@@ -1358,6 +1660,7 @@ function IP:UpdateStatus()
     end
 
     self:_updateButtons()
+    self:_refreshWorkflowGuide()
 end
 
 -- ── Refresh (called by MainFrame on panel show) ───────────────────────────
@@ -1378,7 +1681,7 @@ function IP:Refresh()
     if self.noticeFrame and self._ctrlRow then
         local rowGap = 10
         if not enabled then
-            self.noticeFs:SetText("Invite module is disabled. Enable it in Settings → General.")
+            self.noticeFs:SetText("Invite module is disabled. Enable it in Settings > Recruitment.")
             self.noticeFrame:Show()
             self._ctrlRow:ClearAllPoints()
             self._ctrlRow:SetPoint("TOPLEFT",  self.noticeFrame, "BOTTOMLEFT",  0,  -rowGap)
@@ -1386,7 +1689,7 @@ function IP:Refresh()
         else
             self.noticeFrame:Hide()
             self._ctrlRow:ClearAllPoints()
-            self._ctrlRow:SetPoint("TOPLEFT",  self._hdr, "BOTTOMLEFT",  0,  -rowGap)
+            self._ctrlRow:SetPoint("TOPLEFT",  self.workflowFrame or self._hdr, "BOTTOMLEFT",  0,  -rowGap)
             self._ctrlRow:SetPoint("TOPRIGHT", self.frame, "TOPRIGHT",  -P,  0)
         end
     end

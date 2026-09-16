@@ -125,6 +125,12 @@ local function normalizeRealmKey(realm)
 end
 
 local function realmAllowed(candidate)
+    -- Modern Retail guilds can invite known characters from any realm. Realm
+    -- scope still affects WHO discovery, but it must not reject a valid target.
+    if GC.API and GC.API.SupportsCrossRealmGuildInvites and GC.API.SupportsCrossRealmGuildInvites() then
+        return true
+    end
+
     local realm = candidate and candidate.realm
     if (not realm or realm == "") and candidate and candidate.fullName then
         local _, parsedRealm = tostring(candidate.fullName):match("^([^%-]+)%-(.+)$")

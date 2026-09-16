@@ -412,6 +412,10 @@ local function passesLocalRealmFilter(candidate, realmInfo)
     end
 
     assumeCandidateRealm(candidate, realmInfo)
+    if realmInfo and realmInfo.allRealms == true then
+        return candidate.realm ~= nil
+    end
+
     local realmKey = normalizeRealmKey(candidate.realm)
     if not realmKey then
         return false
@@ -796,7 +800,9 @@ function Scanner:StartScan(extraFilter)
         startedAt      = now(),
         resultEventAt  = nil,
         timedOut       = false,
-        autoAdvanceEnabled = settings.autoAdvanceScan ~= false,
+        -- Keep follow-up WHO queries user-triggered. Timer-driven WHO requests
+        -- have been unreliable on recent clients and may be blocked by Blizzard.
+        autoAdvanceEnabled = false,
         autoPaused     = false,
         statusLine     = "Preparing scan...",
     }
@@ -812,7 +818,9 @@ function Scanner:StartScan(extraFilter)
         #queries
     ))
     printLine("  Guild realm:", tostring(result.realmInfo.guildRealm or "(not found)"))
-    if type(result.realmInfo.scanRealms) == "table" and #result.realmInfo.scanRealms > 0 then
+    if result.realmInfo.allRealms == true then
+        printLine("  Realm scope: all realms available to WHO (results remain server-limited)")
+    elseif type(result.realmInfo.scanRealms) == "table" and #result.realmInfo.scanRealms > 0 then
         printLine(string.format("  Connected/local realms (%d): %s",
             #result.realmInfo.scanRealms,
             table.concat(result.realmInfo.scanRealms, ", ")))

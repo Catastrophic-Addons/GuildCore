@@ -44,7 +44,31 @@ end
 
 function InviteService:GetSettings()
     local state = inviteState()
-    return state and state.settings or nil
+    local settings = state and state.settings or nil
+    if not settings then return nil end
+
+    local maxLevel = (GetMaxPlayerLevel and tonumber(GetMaxPlayerLevel())) or 90
+    local realmScope = tostring(settings.realmScope or "")
+    if realmScope ~= "guild" and realmScope ~= "connected" and realmScope ~= "all" then
+        realmScope = settings.includeConnectedRealms == false and "guild" or "connected"
+    end
+    settings.realmScope = realmScope
+    settings.includeConnectedRealms = realmScope ~= "guild"
+
+    settings.scanScope = settings.scanScope or "focused"
+    if settings.scanScope == "focused" then
+        settings.scanLevelMin = math.max(1, maxLevel - 20)
+        settings.scanLevelMax = maxLevel
+    elseif settings.scanScope == "all" then
+        settings.scanLevelMin = 1
+        settings.scanLevelMax = maxLevel
+    else
+        settings.scanLevelMin = math.max(1, math.min(maxLevel, tonumber(settings.scanLevelMin) or 1))
+        settings.scanLevelMax = math.max(settings.scanLevelMin, math.min(maxLevel, tonumber(settings.scanLevelMax) or maxLevel))
+    end
+    settings.levelMin = settings.scanLevelMin
+    settings.levelMax = settings.scanLevelMax
+    return settings
 end
 
 function InviteService:SetSetting(key, value)
