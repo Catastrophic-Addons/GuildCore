@@ -504,13 +504,9 @@ function I:SendChunksNow(chunks, options)
         return true
     end
 
-    -- Send every line while the Send button's hardware event is still active.
-    -- Timer-delayed follow-ups can lose that protected user-action context and
-    -- leave only the first line delivered on current Retail clients.
-    -- Retail processes multiple chat submissions made during one hardware
-    -- event in reverse order. Submit bottom-to-top so chat displays the
-    -- message in the same top-to-bottom order shown in the preview.
-    for index = #pending, 1, -1 do
+    -- Send every chunk during the Send button's hardware event.
+    -- Preserve the exact top-to-bottom order shown in the preview.
+    for index = 1, #pending do
         local text = pending[index]
         local ok, err = sendPart(text)
         if not ok then
